@@ -7,21 +7,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import os
 from dotenv import load_dotenv
+from data import *
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Retrieve Max password from .env file
 password=os.environ.get("MAX_PASSWORD")
-
-# months list
-months=["1","2","3","4","5","6","7","8","9","10","11","12"]
-# year list
-years=["2022","2023","2024"]
-# default year value
-defaultYear = years[-1]
-# default month value
-defaultMonth = months[0]
 
 def getExcelFile(year, month):
     #if year is not in the combobox options, set year to default value
@@ -63,7 +55,7 @@ def getExcelFile(year, month):
     time.sleep(5)
 
     # go to transaction details
-    driver.get("https://www.max.co.il/transaction-details/personal?filter=-1_-1_1_" + year + "-" + month + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a")
+    driver.get("https://www.max.co.il/transaction-details/personal?filter=-1_-1_1_" + year + "-" + str(int(month) + 1) + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a")
 
     # wait until the pop up window came up
     WebDriverWait(driver, 5).until(

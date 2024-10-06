@@ -1,7 +1,7 @@
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openAI import sortExpensesAI
-from data import monthToExpenseColDict
+from data import *
 
 # initiating the dict of the expenses name and the expense
 expensesDict = {}
@@ -43,7 +43,7 @@ def getExpenses(workbook_path):
 #@TODO add the expenses to the final excel file - go through each line in chat's response, for each line, check the name of the expense and it's cost, add the cost to a
 # dict with the total cost for each category. then, add the category's cost to the final excel sheet
 
-def fillCells(outputWorkbookPath, openAIOutput):
+def fillCells(outputWorkbookPath, openAIOutput, month):
     # load the excel workbook
     wb = load_workbook(outputWorkbookPath)
     # get the active (default) worksheet
@@ -51,7 +51,11 @@ def fillCells(outputWorkbookPath, openAIOutput):
     # category column
     categoryCol = 'B'
     # expense column
-    expenseCol = monthToExpenseColDict[12]
+    if month not in months:
+        expenseCol = monthToExpenseColDict[12]
+    else:
+        expenseCol = monthToExpenseColDict[int(month)]
+
     # starting category row
     categoryRow = 17
     # max category row

@@ -34,7 +34,7 @@ def chooseTargetFile():
     if fileFormat == ".xlsx":
         loading("Loading... Please wait while we fill the expenses, you'll get another message when we are done :)")
         # send workbook path to fillCells function
-        fillCells(workbook_path, expensesSorted)
+        fillCells(workbook_path, expensesSorted, month=monthComboBox.get())
         messagebox.showinfo("Success", "The expenses are filled, you can now see the output file")
     # otherwise, print an error and return None
     else:
@@ -100,6 +100,7 @@ monthComboBox.grid(row=1, column=1, padx=5)
 actionFrame = Frame(window)
 actionFrame.pack(pady=10)
 
+global month
 getExcelFileButton = ttk.Button(fileFrame, text="Get Excel File", command=lambda: getExcelFile(year=yearComboBox.get(), month=monthComboBox.get()))
 getExcelFileButton.grid(row=0, column=0, padx=5)
 

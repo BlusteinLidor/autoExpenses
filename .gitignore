@@ -1,6 +1,7 @@
 __pycache__/
-
-# Ignore environment file
 .env
 venv/
 .venv
+build/
+dist/
+/ui.spec
