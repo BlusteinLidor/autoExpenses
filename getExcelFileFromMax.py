@@ -24,7 +24,9 @@ def getExcelFile(year, month):
         month = defaultMonth
 
     service = Service(executable_path="chromedriver.exe")
-    driver = webdriver.Chrome()
+    options = webdriver.ChromeOptions()
+    options.add_argument("headless")
+    driver = webdriver.Chrome(service=service, options=options)
 
     # go to url
     driver.get("https://www.max.co.il/")
@@ -69,3 +71,5 @@ def getExcelFile(year, month):
     time.sleep(5)
 
     driver.quit()
+
+getExcelFile("2024", "5")
