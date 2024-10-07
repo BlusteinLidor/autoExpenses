@@ -8,7 +8,11 @@ expensesSorted = ""
 # ui choose file function 
 def chooseFile():
     # workbook path
-    workbook_path = filedialog.askopenfilename(title="Choose file", filetypes=(("Excel files", "*.xlsx"), ("All Files", "*.*")), initialdir=r"%userprofile%\downloads")
+    workbook_path = filedialog.askopenfilename(
+        title="Choose file", 
+        filetypes=(("Excel files", "*.xlsx"), ("All Files", "*.*")), 
+        initialdir=r"%userprofile%\downloads"
+        )
     # save the 5 last characters of the file to check if its an xlsx excel file
     fileFormat = (workbook_path[-1:-6:-1])[::-1]
     # if it's an excel file, return the workbook path

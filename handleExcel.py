@@ -21,6 +21,7 @@ def getExpenses(workbook_path):
     categoryRow = 5
     # 
     global expensesDict
+    totalCost = 0
     # loop through the rows and get the expense name and the category, separated by a dash
     while(ws[expenseNameCol + str(categoryRow)].value is not None):
         expenseNameCell = ws[expenseNameCol + str(categoryRow)]
@@ -30,13 +31,20 @@ def getExpenses(workbook_path):
         # if the expense name is already in the dict, add the cost of the expense to the last cost
         if expenseNameCell.value in expensesDict:
             expensesDict[expenseNameCell.value][0] += expenseCostCell.value
+            totalCost += expenseCostCell.value
         # else, add the expense name, it's cost and it's category
         else:
             expensesDict.update({expenseNameCell.value : [expenseCostCell.value, expenseCategoryCell.value]})
+            totalCost += expenseCostCell.value
         # go to the next row
         categoryRow += 1
     
+    file = open("expensesDict.txt", "w")
+
     expensesSorted = sortExpensesAI(expensesDict)
+
+    file.write(str(expensesDict) + "\n" + expensesSorted + "\n Total cost: " + str(totalCost))
+    file.close()
 
     return expensesSorted
 
@@ -92,41 +100,41 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
 
     wb.save(outputWorkbookPath[:-5] + "_output" + outputWorkbookPath[-5:])
                 
-#getExpenses(r"C:\Users\liido\Downloads\hello.xlsx")
+# getExpenses(r"C:\Users\liido\Downloads\transaction-details_export_1728243409088.xlsx")
 
-# string = """TRES JOLIE - 20 - רהיטים, כלי בית וגן  
-# מאפיתת אורן משי באר שבע - 44 - מצרכי מזון  
-# סופר פארם מצדה ב"ש - 46.8 - תרופות, בדיקות וטיפולים רפואיים  
-# 7 בעיר הבלוק - 39.8 - מצרכי מזון  
-# סהרה אלקטרוניקה בע"מ - 184 - מתנות  
-# חברת החשמל לישראל בע"מ - 368.73 - חשבון חשמל  
-# פז אפליקציית יילו - 683.15 - חשבון גז  
-# פרפל יבוא ושיווק - 77 - תכשיטים וקוסמטיקה  
-# סופרמרקט הגשר - 15 - מצרכי מזון  
-# אייבורי מחשבים - 195 - גאדג'טים ואלקטרוניקה  
-# אפריל פארק הקרח - 127 - מוצרי היגיינה  
-# חברת פרטנר תקשורת בע"מ (ה - 119 - סלולארי  
-# מחסני השוק אינטרנט - 1350.04 - מצרכי מזון  
-# היי קוקי - 122.55 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
-# כביש 6 - 76.38 - כביש 6 וחוצה צפון  
-# WOLT - 320 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
-# סופר קופיקס - 63.4 - מצרכי מזון  
-# פלאפון חשבון תקופתי - 41.84 - סלולארי  
-# מ. התחבורה ר.רכב - 906 - דו"חות וקנסות  
-# שוהם סטוק בע"מ - 58.74 - מצרכי מזון  
-# AIG ביטוח רכב - 2855 - ביטוח רכב  
-# המילטון חשמל ואלקטרוניקה - 450 - גאדג'טים ואלקטרוניקה  
-# סיטי שופ - 79.28 - ספרים ומוזיקה  
-# הסטוק גרנד קניון ב"ש~צמרת - 15.9 - מתנות  
-# תכשיטי ישראל - 30 - מתנות  
-# אושר עד באר שבע - 140.7 - מצרכי מזון  
-# פנגו חשבונית חודשית - 9.32 - הוצאות תחבורה ציבורית ואופניים  
-# מי שבע בע"מ - 114.02 - דו"חות וקנסות  
-# רוזה & פולה - 40 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
-# דמי כרטיס - 0.0 - משיכת כספים (כספומט)  
-# עיריית באר שבע - 390.58 - דו"חות וקנסות  
-# BIT - 100 - העברת כספים  
-# יעקב כהן - 60 - תספורת  
-# מס הכנסה עצמאים וחברות - 500 - דו"חות וקנסות"""
-# 
-# fillCells("C:/Users/liido/Downloads/expenses_2024.xlsx", string)
+#string = """TRES JOLIE - 20 - רהיטים, כלי בית וגן  
+#מאפיתת אורן משי באר שבע - 44 - מצרכי מזון  
+#סופר פארם מצדה ב"ש - 46.8 - תרופות, בדיקות וטיפולים רפואיים  
+#7 בעיר הבלוק - 39.8 - מצרכי מזון  
+#סהרה אלקטרוניקה בע"מ - 184 - מתנות  
+#חברת החשמל לישראל בע"מ - 368.73 - חשבון חשמל  
+#פז אפליקציית יילו - 683.15 - חשבון גז  
+#פרפל יבוא ושיווק - 77 - תכשיטים וקוסמטיקה  
+#סופרמרקט הגשר - 15 - מצרכי מזון  
+#אייבורי מחשבים - 195 - גאדג'טים ואלקטרוניקה  
+#אפריל פארק הקרח - 127 - מוצרי היגיינה  
+#חברת פרטנר תקשורת בע"מ (ה - 119 - סלולארי  
+#מחסני השוק אינטרנט - 1350.04 - מצרכי מזון  
+#היי קוקי - 122.55 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
+#כביש 6 - 76.38 - כביש 6 וחוצה צפון  
+#WOLT - 320 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
+#סופר קופיקס - 63.4 - מצרכי מזון  
+#פלאפון חשבון תקופתי - 41.84 - סלולארי  
+#מ. התחבורה ר.רכב - 906 - דו"חות וקנסות  
+#שוהם סטוק בע"מ - 58.74 - מצרכי מזון  
+#AIG ביטוח רכב - 2855 - ביטוח רכב  
+#המילטון חשמל ואלקטרוניקה - 450 - גאדג'טים ואלקטרוניקה  
+#סיטי שופ - 79.28 - ספרים ומוזיקה  
+#הסטוק גרנד קניון ב"ש~צמרת - 15.9 - מתנות  
+#תכשיטי ישראל - 30 - מתנות  
+#אושר עד באר שבע - 140.7 - מצרכי מזון  
+#פנגו חשבונית חודשית - 9.32 - הוצאות תחבורה ציבורית ואופניים  
+#מי שבע בע"מ - 114.02 - דו"חות וקנסות  
+#רוזה & פולה - 40 - אוכל בחוץ (כולל מסעדות, בתי קפה, משלוחים)  
+#דמי כרטיס - 0.0 - משיכת כספים (כספומט)  
+#עיריית באר שבע - 390.58 - דו"חות וקנסות  
+#BIT - 100 - העברת כספים  
+#יעקב כהן - 60 - תספורת  
+#מס הכנסה עצמאים וחברות - 500 - דו"חות וקנסות"""
+#
+#fillCells("C:/Users/liido/Downloads/expenses_2024.xlsx", string, 12)
