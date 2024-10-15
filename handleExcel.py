@@ -64,6 +64,7 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
     else:
         expenseCol = monthToExpenseColDict[int(month)]
 
+    errorString = ""
     # starting category row
     categoryRow = 17
     # max category row
@@ -81,22 +82,33 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
 
     for val in expenseNameCostCategoryDict:
         categoryRow = 17
+        found = False
         while(categoryRow < maxCategoryRow):
             # if the expense name in the expenseNameCostCategoryDict equals the expense name in the excel file
-            if ws[categoryCol + str(categoryRow)].value is not None and ws[categoryCol + str(categoryRow)].value in expenseNameCostCategoryDict.get(val)[1]:
-                #@TODO add the expense cost to the output excel file
-                if ws[expenseCol + str(categoryRow)].value is None:
-                    ws[expenseCol + str(categoryRow)].value = float(expenseNameCostCategoryDict.get(val)[0])
-                else:
-                    ws[expenseCol + str(categoryRow)].value = float(ws[expenseCol + str(categoryRow)].value) + float(expenseNameCostCategoryDict.get(val)[0])
-                #@TODO add the name of the expense to the comment (append the name, don't replace it)
-                if ws[expenseCol + str(categoryRow)].comment is None:
-                    ws[expenseCol + str(categoryRow)].comment = Comment("", "Automated")
-                #comment = Comment((ws[expenseCol + str(categoryRow)] ,"\n", val), "Automated")
-                comment = Comment(val + " - " + str(expenseNameCostCategoryDict.get(val)[0]), "Automated")
-                if comment.text != "":
-                    ws[expenseCol + str(categoryRow)].comment.text += comment.text + "\n"
+            if ws[categoryCol + str(categoryRow)].value is not None:
+                if ws[categoryCol + str(categoryRow)].value in expenseNameCostCategoryDict.get(val)[1]:
+                    #@TODO add the expense cost to the output excel file
+                    if ws[expenseCol + str(categoryRow)].value is None:
+                        ws[expenseCol + str(categoryRow)].value = float(expenseNameCostCategoryDict.get(val)[0])
+                    else:
+                        ws[expenseCol + str(categoryRow)].value = float(ws[expenseCol + str(categoryRow)].value) + float(expenseNameCostCategoryDict.get(val)[0])
+                    #@TODO add the name of the expense to the comment (append the name, don't replace it)
+                    if ws[expenseCol + str(categoryRow)].comment is None:
+                        ws[expenseCol + str(categoryRow)].comment = Comment("", "Automated")
+                    #comment = Comment((ws[expenseCol + str(categoryRow)] ,"\n", val), "Automated")
+                    comment = Comment(val + " - " + str(expenseNameCostCategoryDict.get(val)[0]), "Automated")
+                    if comment.text != "":
+                        ws[expenseCol + str(categoryRow)].comment.text += comment.text + "\n"
+                    found = True
             categoryRow += 1
+        if not found:
+            errorString += str(val) + " " + str(expenseNameCostCategoryDict.get(val)[0]) + str(expenseNameCostCategoryDict.get(val)[1]) + "\n"
+
+            
+
+    file = open("errors.txt", "w")
+    file.write(errorString)
+    file.close()
 
     wb.save(outputWorkbookPath[:-5] + "_output" + outputWorkbookPath[-5:])
                 
