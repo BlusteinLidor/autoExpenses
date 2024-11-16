@@ -71,5 +71,3 @@ def getExcelFile(year, month):
     time.sleep(5)
 
     driver.quit()
-
-getExcelFile("2024", "5")
