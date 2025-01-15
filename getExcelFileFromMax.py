@@ -13,10 +13,11 @@ from data import *
 load_dotenv()
 
 # Retrieve Max password from .env file
-password=os.environ.get("MAX_PASSWORD")
+password = os.environ.get("MAX_PASSWORD")
+
 
 def getExcelFile(year, month):
-    #if year is not in the combobox options, set year to default value
+    # if year is not in the combobox options, set year to default value
     if year not in years:
         year = defaultYear
     # if month is not in the combobox options, set month to default value
@@ -26,6 +27,8 @@ def getExcelFile(year, month):
     service = Service(executable_path="chromedriver.exe")
     options = webdriver.ChromeOptions()
     options.add_argument("headless")
+    # if the driver version is not up to date, download the latest version from the link below
+    # https://googlechromelabs.github.io/chrome-for-testing/
     driver = webdriver.Chrome(service=service, options=options)
 
     # go to url
@@ -40,7 +43,9 @@ def getExcelFile(year, month):
         EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "כניסה עם סיסמה"))
     )
     # then click on the option - "login with password"
-    login_with_password_button = driver.find_element(By.PARTIAL_LINK_TEXT, "כניסה עם סיסמה")
+    login_with_password_button = driver.find_element(
+        By.PARTIAL_LINK_TEXT, "כניסה עם סיסמה"
+    )
     login_with_password_button.click()
 
     # input email
@@ -57,7 +62,19 @@ def getExcelFile(year, month):
     time.sleep(5)
 
     # go to transaction details
-    driver.get("https://www.max.co.il/transaction-details/personal?filter=-1_-1_1_" + year + "-" + str(int(month) + 1) + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a")
+    if month == "12":
+        monthInt = "1"
+        yearInt = str(int(year) + 1)
+    else:
+        monthInt = str(int(month) + 1)
+        yearInt = year
+    driver.get(
+        "https://www.max.co.il/transaction-details/personal?filter=-1_-1_1_"
+        + yearInt
+        + "-"
+        + monthInt
+        + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a"
+    )
 
     # wait until the pop up window came up
     WebDriverWait(driver, 5).until(
