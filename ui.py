@@ -1,6 +1,6 @@
 from tkinter import *
 from tkinter import filedialog, ttk, messagebox
-from getExcelFileFromMax import getExcelFile
+from getExcelFileFromMax import getExcelFile, toggleHeadless
 from handleExcel import getExpenses, fillCells
 
 expensesSorted = ""
@@ -73,6 +73,13 @@ window.title("Expense Sort Automation")
 window.geometry("400x300")
 window.resizable(False, False)  # Disable resizing
 # @TODO add an icon to the window
+menuBar = Menu(window)
+settingsMenu = Menu(menuBar, tearoff=0)
+# settingsMenu.add_command(label="Headless")
+headlessCheckbuttonState = IntVar()
+settingsMenu.add_checkbutton(label="Headless", command=lambda: toggleHeadless(headlessCheckbuttonState.get()), variable=headlessCheckbuttonState)
+menuBar.add_cascade(label="Settings", menu=settingsMenu)
+window.config(menu=menuBar)
 
 # Styling
 label_font = ("Arial", 10)

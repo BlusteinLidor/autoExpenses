@@ -5,6 +5,5 @@ venv/
 build/
 dist/
 /ui.spec
-chromedriver.exe
 ui.exe
 errors.txt
