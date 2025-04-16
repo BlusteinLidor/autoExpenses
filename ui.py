@@ -1,10 +1,14 @@
 from tkinter import *
 from tkinter import filedialog, ttk, messagebox
-from getExcelFileFromMax import getExcelFile, toggleHeadless
+from getExcelFileFromMax import getExcelFile, toggleHeadless, getExcelFileThreaded
 from handleExcel import getExpenses, fillCells
+from threading import Thread
 
 expensesSorted = ""
 
+
+def chooseFileThreaded():
+    Thread(target=chooseFile, daemon=True).start()
 
 # ui choose file function
 def chooseFile():
@@ -30,6 +34,8 @@ def chooseFile():
     else:
         messagebox.showerror("Failure", "Error: the file's fromat is not xlsx")
 
+def chooseTargetFileThreaded():
+    Thread(target=chooseTargetFile, daemon=True).start()
 
 def chooseTargetFile():
     # workbook path
@@ -99,7 +105,7 @@ defaultYear = years[-1]
 defaultMonth = months[0]
 
 # choose file button
-chooseFileButton = ttk.Button(fileFrame, text="Choose File", command=chooseFile)
+chooseFileButton = ttk.Button(fileFrame, text="Choose File", command=chooseFileThreaded)
 chooseFileButton.grid(row=0, column=1, padx=5)
 # Loading Label
 loadingText = StringVar()
@@ -127,7 +133,8 @@ global month
 getExcelFileButton = ttk.Button(
     fileFrame,
     text="Get Excel File",
-    command=lambda: getExcelFile(year=yearComboBox.get(), month=monthComboBox.get()),
+    # command=lambda: getExcelFile(year=yearComboBox.get(), month=monthComboBox.get()),
+    command=lambda: getExcelFileThreaded(year=yearComboBox.get(), month=monthComboBox.get()),
 )
 getExcelFileButton.grid(row=0, column=0, padx=5)
 
@@ -136,7 +143,7 @@ closeButton.grid(row=0, column=0, padx=5)
 
 # choose target file button
 chooseTargetFileButton = ttk.Button(
-    fileFrame, text="Choose Target File", command=chooseTargetFile
+    fileFrame, text="Choose Target File", command=chooseTargetFileThreaded
 )
 chooseTargetFileButton.grid(row=0, column=2, padx=5)
 

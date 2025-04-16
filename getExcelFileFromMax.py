@@ -8,6 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import os
 from dotenv import load_dotenv
 from data import *
+from threading import Thread
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,6 +26,9 @@ def toggleHeadless(headlessState: int): # should be 0 (off) or 1 (on)
         headless = True
     else:
         headless = False
+
+def getExcelFileThreaded(year, month):
+    Thread(target=getExcelFile, args=(year, month), daemon=True).start()
 
 def getExcelFile(year, month):
     # if year is not in the combobox options, set year to default value
@@ -131,3 +135,4 @@ def getExcelFile(year, month):
     time.sleep(5)
 
     driver.quit()
+    print("Done downloading the excel file")
