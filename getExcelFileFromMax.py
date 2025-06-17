@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 from data import *
 from threading import Thread
+import chromedriver_autoinstaller
 
 # Load environment variables from .env file
 load_dotenv()
@@ -38,7 +39,8 @@ def getExcelFile(year, month):
     if month not in months:
         month = defaultMonth
 
-    service = Service(executable_path="chromedriver.exe")
+    chromeDriverPath = chromedriver_autoinstaller.install() 
+    service = Service(executable_path=f"{chromeDriverPath}")
     options = webdriver.ChromeOptions()
     if headless:
         options.add_argument("--headless")
@@ -46,16 +48,16 @@ def getExcelFile(year, month):
         options.add_argument("--disable-headless-mode")
     # if the driver version is not up to date, download the latest version from the link below
     # https://googlechromelabs.github.io/chrome-for-testing/
-    driver = webdriver.Chrome(service=service, options=options)
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+    except Exception as e:
+        print("Error initializing Chrome driver: ", e)
+        
 
     # go to url
-    driver.get("https://www.max.co.il/")
+    driver.get("https://www.max.co.il/login")
 
-    # press on main login button
-    main_login_button = driver.find_element(By.CLASS_NAME, "personal-text")
-    main_login_button.click()
-
-    # wait until the pop up window came 
+    # wait until the pop up window shows 
     try:
         print("Waiting for the pop-up window to appear")
         WebDriverWait(driver, 10).until(
