@@ -10,9 +10,13 @@ from dotenv import load_dotenv
 from data import *
 from threading import Thread
 import chromedriver_autoinstaller
+from get_for_ex_trans import get_foreign_exchange_transactions
+from add_rows_to_csv import parse_amount
+import shutil
+from pathlib import Path
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(".env", override=True)
 
 # Retrieve Max password from .env file
 username = os.environ.get("MAX_USERNAME")
@@ -21,15 +25,18 @@ id = os.environ.get("MAX_ID")
 
 headless = False
 
-def toggleHeadless(headlessState: int): # should be 0 (off) or 1 (on)
+
+def toggleHeadless(headlessState: int):  # should be 0 (off) or 1 (on)
     global headless
     if headlessState == 1:
         headless = True
     else:
         headless = False
 
+
 def getExcelFileThreaded(year, month):
     Thread(target=getExcelFile, args=(year, month), daemon=True).start()
+
 
 def getExcelFile(year, month):
     # if year is not in the combobox options, set year to default value
@@ -39,7 +46,7 @@ def getExcelFile(year, month):
     if month not in months:
         month = defaultMonth
 
-    chromeDriverPath = chromedriver_autoinstaller.install() 
+    chromeDriverPath = chromedriver_autoinstaller.install()
     service = Service(executable_path=f"{chromeDriverPath}")
     options = webdriver.ChromeOptions()
     if headless:
@@ -52,12 +59,11 @@ def getExcelFile(year, month):
         driver = webdriver.Chrome(service=service, options=options)
     except Exception as e:
         print("Error initializing Chrome driver: ", e)
-        
 
     # go to url
     driver.get("https://www.max.co.il/login")
 
-    # wait until the pop up window shows 
+    # wait until the pop up window shows
     try:
         print("Waiting for the pop-up window to appear")
         WebDriverWait(driver, 10).until(
@@ -92,8 +98,7 @@ def getExcelFile(year, month):
         )
         print("ID input field appeared")
         try:
-            id_input = driver.find_element(
-            By.XPATH, "//div[@id='idInput']/input[1]")
+            id_input = driver.find_element(By.XPATH, "//div[@id='idInput']/input[1]")
             id_input.send_keys(id)
             time.sleep(3)
             # press enter to complete login
@@ -129,12 +134,54 @@ def getExcelFile(year, month):
         print("Download button appeared")
         download_excel = driver.find_element(By.CLASS_NAME, "download-excel")
         download_excel.click()
+        print("Done downloading the excel file")
     except Exception as e:
         print("Error: ", e)
         driver.save_screenshot("screenshot.png")
         raise Exception("Failed to download the excel file")
 
+    try:
+        dealTable = driver.find_element(
+            By.CSS_SELECTOR,
+            "app-table.ng-star-inserted:nth-child(6) > div:nth-child(1)",
+        )
+        if dealTable:
+            print("Deal table found")
+            html = dealTable.get_attribute("outerHTML")
+            with open("foreign_exchange_transactions.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            print("Deal table HTML saved to foreign_exchange_transactions.html")
+        else:
+            raise Exception("Deal table not found")
+    except Exception as e:
+        print("Error: ", e)
+        driver.save_screenshot("deal_table_screenshot.png")
+        raise Exception("Deal table not found, check the screenshot")
+
     time.sleep(5)
 
-    driver.quit()
-    print("Done downloading the excel file")
+    try:
+        driver.quit()
+        print("Driver closed successfully")
+    except Exception as e:
+        print("Error closing the driver: ", e)
+
+    downloads_path = str(Path.home() / "Downloads")
+    destination_path = ""
+
+    files = [
+        os.path.join(downloads_path, f)
+        for f in os.listdir(downloads_path)
+        if f.endswith(".xlsx")
+    ]
+    latest_file = max(files, key=os.path.getctime) if files else None
+
+    target_file = f"transaction-details_export_{year}_{month}.xlsx"
+    shutil.move(
+        latest_file, os.path.join(destination_path, os.path.basename(target_file))
+    )
+
+    get_foreign_exchange_transactions(
+        "foreign_exchange_transactions.html", "transactions.csv"
+    )
+    parse_amount("transactions.csv", target_file)
