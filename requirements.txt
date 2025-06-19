@@ -1,2 +1,4 @@
 https://googlechromelabs.github.io/chrome-for-testing/#stable
 openpyxl
+chromedriver_autoinstaller
+selenium
