@@ -19,9 +19,12 @@ from pathlib import Path
 load_dotenv(".env", override=True)
 
 # Retrieve Max password from .env file
-username = os.environ.get("MAX_USERNAME")
-password = os.environ.get("MAX_PASSWORD")
-id = os.environ.get("MAX_ID")
+max_username = os.environ.get("MAX_USERNAME")
+max_password = os.environ.get("MAX_PASSWORD")
+id = os.environ.get("ID")
+bank_password = os.environ.get("BANK_PASSWORD")
+bank_id_code = os.environ.get("BANK_ID_CODE")
+
 
 headless = False
 
@@ -81,11 +84,11 @@ def getExcelFile(year, month):
 
     # input email
     username_input = driver.find_element(By.ID, "user-name")
-    username_input.send_keys(username)
+    username_input.send_keys(max_username)
 
     # input password
     password_input = driver.find_element(By.ID, "password")
-    password_input.send_keys(password)
+    password_input.send_keys(max_password)
 
     # press enter to complete login
     password_input.send_keys(Keys.ENTER)
@@ -157,6 +160,82 @@ def getExcelFile(year, month):
         print("Error: ", e)
         driver.save_screenshot("deal_table_screenshot.png")
         raise Exception("Deal table not found, check the screenshot")
+
+    time.sleep(5)
+
+    driver.get("https://start.telebank.co.il/login/#/LOGIN_PAGE")
+
+    # wait for the form to load
+    try:
+        print("Waiting for the Discount Bank login form to appear")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "loginForm"))
+        )
+        print("Discount Bank login form appeared")
+    except Exception as e:
+        print("Error: ", e)
+        driver.save_screenshot("discount_bank_login_form_screenshot.png")
+        raise Exception("Failed to load Discount Bank login form")
+
+    # input id
+    bank_id_input = driver.find_element(By.ID, "tzId")
+    bank_id_input.send_keys(id)
+
+    # input password
+    bank_password_input = driver.find_element(By.ID, "tzPassword")
+    bank_password_input.send_keys(bank_password)
+
+    # bank id code
+    bank_id_code_input = driver.find_element(By.ID, "aidnum")
+    bank_id_code_input.send_keys(bank_id_code)
+
+    driver.find_element(By.CSS_SELECTOR, ".sendBtn").click()
+
+    time.sleep(5)
+    # wait for the transactions page to load
+
+    driver.get("https://start.telebank.co.il/apollo/retail/#/OSH_LENTRIES_ALTAMIRA")
+
+    try:
+        print("Waiting for the transactions table to appear")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".advanced-search-btn-icon"))
+        )
+        print("Transactions table appeared")
+    except Exception as e:
+        print("Error: ", e)
+        driver.save_screenshot("transactions_table_screenshot.png")
+        raise Exception("Failed to load transactions table")
+    
+    # click on the advanced search button
+    try:
+        advanced_search_button = driver.find_element(By.CSS_SELECTOR, ".advanced-search-btn-icon")
+        advanced_search_button.click()
+        print("Advanced search button clicked")
+    except Exception as e:
+        print("Error clicking advanced search button: ", e)
+        driver.save_screenshot("advanced_search_button_screenshot.png")
+        raise Exception("Failed to click on the advanced search button")
+
+    try:
+        print("Waiting for the pop-up to appear")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "fromDate"))
+        )
+        print("Pop-up appeared")
+    except Exception as e:
+        print("Error: ", e)
+        driver.save_screenshot("popup_screenshot.png")
+        raise Exception("Failed to load the pop-up")
+    
+    # input the date range
+    from_date_input = driver.find_element(By.ID, "fromDate")
+    from_date_input.send_keys(f"10/{month}/{year}")
+
+    to_date_input = driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO")
+    to_date_input.send_keys(f"9/{str(int(month)+1)}/{year}")
+    
+    # @TODO continue
 
     time.sleep(5)
 
