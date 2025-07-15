@@ -14,6 +14,7 @@ from get_for_ex_trans import get_foreign_exchange_transactions
 from add_rows_to_csv import parse_amount
 import shutil
 from pathlib import Path
+from selenium.webdriver.common.action_chains import ActionChains
 
 # Load environment variables from .env file
 load_dotenv(".env", override=True)
@@ -230,12 +231,46 @@ def getExcelFile(year, month):
     
     # input the date range
     from_date_input = driver.find_element(By.ID, "fromDate")
-    from_date_input.send_keys(f"10/{month}/{year}")
-
-    to_date_input = driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO")
-    to_date_input.send_keys(f"9/{str(int(month)+1)}/{year}")
-    
-    # @TODO continue
+    from_date_input.click()
+    time.sleep(0.5)
+    year_input = driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)")
+    if year_input.value_of_css_property("innerText") == year:
+        year_input.click()
+        driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)").click()
+        if month % 3 == 0:
+            col = 3
+        elif month % 3 == 1:
+            col = 1
+        else:
+            col = 2
+        if month <= 3:
+            row = 1
+        elif month <= 6:
+            row = 2
+        elif month <= 9:
+            row = 3
+        else:
+            row = 4
+        driver.find_element(By.CSS_SELECTOR, f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)").click()
+        time.sleep(0.5)
+        driver.find_element(By.CSS_SELECTOR, "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)").click()
+        time.sleep(0.5)
+        driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO").click()
+        year_input = driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)")
+        if year_input.value_of_css_property("innerText") == year:
+            year_input.click()
+            driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)").click()
+            col += 1
+            if col > 3 and row < 4:
+                col = 1
+                row += 1
+            driver.find_element(By.CSS_SELECTOR, f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)").click()
+            time.sleep(0.5)
+            driver.find_element(By.CSS_SELECTOR, "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)").click()
+            time.sleep(0.5) 
+            driver.find_element(By.CSS_SELECTOR, "button.advanced-search-btn").click()
+        
+        
 
     time.sleep(5)
 
