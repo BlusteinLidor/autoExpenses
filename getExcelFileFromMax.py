@@ -164,115 +164,158 @@ def getExcelFile(year, month):
 
     time.sleep(5)
 
-    driver.get("https://start.telebank.co.il/login/#/LOGIN_PAGE")
+    # driver.get("https://start.telebank.co.il/login/#/LOGIN_PAGE")
 
-    # wait for the form to load
-    try:
-        print("Waiting for the Discount Bank login form to appear")
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "loginForm"))
-        )
-        print("Discount Bank login form appeared")
-    except Exception as e:
-        print("Error: ", e)
-        driver.save_screenshot("discount_bank_login_form_screenshot.png")
-        raise Exception("Failed to load Discount Bank login form")
+    # # maximize the window
+    # driver.maximize_window()
 
-    # input id
-    bank_id_input = driver.find_element(By.ID, "tzId")
-    bank_id_input.send_keys(id)
+    # # wait for the form to load
+    # try:
+    #     print("Waiting for the Discount Bank login form to appear")
+    #     WebDriverWait(driver, 10).until(
+    #         EC.presence_of_element_located((By.ID, "loginForm"))
+    #     )
+    #     print("Discount Bank login form appeared")
+    # except Exception as e:
+    #     print("Error: ", e)
+    #     driver.save_screenshot("discount_bank_login_form_screenshot.png")
+    #     raise Exception("Failed to load Discount Bank login form")
 
-    # input password
-    bank_password_input = driver.find_element(By.ID, "tzPassword")
-    bank_password_input.send_keys(bank_password)
+    # # input id
+    # bank_id_input = driver.find_element(By.ID, "tzId")
+    # bank_id_input.send_keys(id)
 
-    # bank id code
-    bank_id_code_input = driver.find_element(By.ID, "aidnum")
-    bank_id_code_input.send_keys(bank_id_code)
+    # # input password
+    # bank_password_input = driver.find_element(By.ID, "tzPassword")
+    # bank_password_input.send_keys(bank_password)
 
-    driver.find_element(By.CSS_SELECTOR, ".sendBtn").click()
+    # # bank id code
+    # bank_id_code_input = driver.find_element(By.ID, "aidnum")
+    # bank_id_code_input.send_keys(bank_id_code)
 
-    time.sleep(5)
-    # wait for the transactions page to load
+    # bank_id_code_input.send_keys(Keys.ENTER)
 
-    driver.get("https://start.telebank.co.il/apollo/retail/#/OSH_LENTRIES_ALTAMIRA")
+    # WebDriverWait(driver, 10).until(
+    #     EC.presence_of_element_located(
+    #         (By.XPATH, '//*[@id="login-page"]/div/form/div[3]/button')
+    #     )
+    # )
+    # driver.find_element(
+    #     By.XPATH, '//*[@id="login-page"]/div/form/div[3]/button'
+    # ).click()
 
-    try:
-        print("Waiting for the transactions table to appear")
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".advanced-search-btn-icon"))
-        )
-        print("Transactions table appeared")
-    except Exception as e:
-        print("Error: ", e)
-        driver.save_screenshot("transactions_table_screenshot.png")
-        raise Exception("Failed to load transactions table")
-    
-    # click on the advanced search button
-    try:
-        advanced_search_button = driver.find_element(By.CSS_SELECTOR, ".advanced-search-btn-icon")
-        advanced_search_button.click()
-        print("Advanced search button clicked")
-    except Exception as e:
-        print("Error clicking advanced search button: ", e)
-        driver.save_screenshot("advanced_search_button_screenshot.png")
-        raise Exception("Failed to click on the advanced search button")
+    # time.sleep(5)
+    # # wait for the transactions page to load
 
-    try:
-        print("Waiting for the pop-up to appear")
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "fromDate"))
-        )
-        print("Pop-up appeared")
-    except Exception as e:
-        print("Error: ", e)
-        driver.save_screenshot("popup_screenshot.png")
-        raise Exception("Failed to load the pop-up")
-    
-    # input the date range
-    from_date_input = driver.find_element(By.ID, "fromDate")
-    from_date_input.click()
-    time.sleep(0.5)
-    year_input = driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)")
-    if year_input.value_of_css_property("innerText") == year:
-        year_input.click()
-        driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)").click()
-        if month % 3 == 0:
-            col = 3
-        elif month % 3 == 1:
-            col = 1
-        else:
-            col = 2
-        if month <= 3:
-            row = 1
-        elif month <= 6:
-            row = 2
-        elif month <= 9:
-            row = 3
-        else:
-            row = 4
-        driver.find_element(By.CSS_SELECTOR, f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)").click()
-        time.sleep(0.5)
-        driver.find_element(By.CSS_SELECTOR, "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)").click()
-        time.sleep(0.5)
-        driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO").click()
-        year_input = driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)")
-        if year_input.value_of_css_property("innerText") == year:
-            year_input.click()
-            driver.find_element(By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)").click()
-            col += 1
-            if col > 3 and row < 4:
-                col = 1
-                row += 1
-            driver.find_element(By.CSS_SELECTOR, f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)").click()
-            time.sleep(0.5)
-            driver.find_element(By.CSS_SELECTOR, "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)").click()
-            time.sleep(0.5) 
-            driver.find_element(By.CSS_SELECTOR, "button.advanced-search-btn").click()
-        
-        
+    # driver.get("https://start.telebank.co.il/apollo/retail/#/OSH_LENTRIES_ALTAMIRA")
 
-    time.sleep(5)
+    # try:
+    #     print("Waiting for the transactions table to appear")
+    #     WebDriverWait(driver, 10).until(
+    #         EC.presence_of_element_located(
+    #             (By.CSS_SELECTOR, ".advanced-search-btn-icon")
+    #         )
+    #     )
+    #     print("Transactions table appeared")
+    # except Exception as e:
+    #     print("Error: ", e)
+    #     driver.save_screenshot("transactions_table_screenshot.png")
+    #     raise Exception("Failed to load transactions table")
+
+    # # click on the advanced search button
+    # try:
+    #     print("Clicking on the advanced search button")
+    #     WebDriverWait(driver, 10).until(
+    #         EC.element_to_be_clickable(
+    #             (By.XPATH, '//*[@id="advanced-search-window-btn"]/button/span[2]')
+    #         )
+    #     )
+    #     advanced_search_button = driver.find_element(
+    #         By.XPATH, '//*[@id="advanced-search-window-btn"]/button/span[2]'
+    #     )
+    #     advanced_search_button.click()
+    #     print("Advanced search button clicked")
+    # except Exception as e:
+    #     print("Error clicking advanced search button: ", e)
+    #     driver.save_screenshot("advanced_search_button_screenshot.png")
+    #     raise Exception("Failed to click on the advanced search button")
+
+    # try:
+    #     print("Waiting for the pop-up to appear")
+    #     WebDriverWait(driver, 10).until(
+    #         EC.presence_of_element_located((By.ID, "fromDate"))
+    #     )
+    #     print("Pop-up appeared")
+    # except Exception as e:
+    #     print("Error: ", e)
+    #     driver.save_screenshot("popup_screenshot.png")
+    #     raise Exception("Failed to load the pop-up")
+
+    # # input the date range
+    # from_date_input = driver.find_element(By.ID, "fromDate")
+    # from_date_input.click()
+    # time.sleep(0.5)
+    # year_input = driver.find_element(
+    #     By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)"
+    # )
+    # year_input_text = year_input.get_attribute("text")
+    # print(year_input_text)
+    # time.sleep(10)
+    # if year_input_text == year:
+    #     year_input.click()
+    #     driver.find_element(
+    #         By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)"
+    #     ).click()
+    #     if month % 3 == 0:
+    #         col = 3
+    #     elif month % 3 == 1:
+    #         col = 1
+    #     else:
+    #         col = 2
+    #     if month <= 3:
+    #         row = 1
+    #     elif month <= 6:
+    #         row = 2
+    #     elif month <= 9:
+    #         row = 3
+    #     else:
+    #         row = 4
+    #     driver.find_element(
+    #         By.CSS_SELECTOR,
+    #         f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)",
+    #     ).click()
+    #     time.sleep(0.5)
+    #     driver.find_element(
+    #         By.CSS_SELECTOR,
+    #         "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)",
+    #     ).click()
+    #     time.sleep(0.5)
+    #     driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO").click()
+    #     year_input = driver.find_element(
+    #         By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)"
+    #     )
+    #     if year_input.value_of_css_property("innerText") == year:
+    #         year_input.click()
+    #         driver.find_element(
+    #             By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)"
+    #         ).click()
+    #         col += 1
+    #         if col > 3 and row < 4:
+    #             col = 1
+    #             row += 1
+    #         driver.find_element(
+    #             By.CSS_SELECTOR,
+    #             f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)",
+    #         ).click()
+    #         time.sleep(0.5)
+    #         driver.find_element(
+    #             By.CSS_SELECTOR,
+    #             "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)",
+    #         ).click()
+    #         time.sleep(0.5)
+    #         driver.find_element(By.CSS_SELECTOR, "button.advanced-search-btn").click()
+
+    # time.sleep(10)
 
     try:
         driver.quit()
