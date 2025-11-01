@@ -1,3 +1,9 @@
+from datetime import datetime
+
+START_YEAR = 2022
+START_MONTH = 1
+END_MONTH = 12
+
 # dict of main-categories to sub-categories
 fullDict = {
     "אופנה": ("ביגוד, תכשיטים וקוסמטיקה"),
@@ -54,9 +60,10 @@ monthToExpenseColDict = {
 }
 
 # months list
-months = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+months = [str(m) for m in range(START_MONTH, END_MONTH + 1)]
 # year list
-years = ["2022", "2023", "2024", "2025"]
+current_year = datetime.now().year
+years = [str(y) for y in range(START_YEAR, current_year + 1)]
 # default year value
 defaultYear = years[-1]
 # default month value

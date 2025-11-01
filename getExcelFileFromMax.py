@@ -15,6 +15,7 @@ from add_rows_to_csv import parse_amount
 import shutil
 from pathlib import Path
 from selenium.webdriver.common.action_chains import ActionChains
+from utils import *
 
 # Load environment variables from .env file
 load_dotenv(".env", override=True)
@@ -37,36 +38,45 @@ def toggleHeadless(headlessState: int):  # should be 0 (off) or 1 (on)
     else:
         headless = False
 
-
 def getExcelFileThreaded(year, month):
     Thread(target=getExcelFile, args=(year, month), daemon=True).start()
 
+def initializeDriver():
+    print("Initializing Chrome driver")
+    # Ensure chromedriver_autoinstaller will provide the matching driver for the current Chrome.
+    # chromedriver_autoinstaller.install() returns the path to the chromedriver executable
+    # and will only download when the matching driver isn't already present.
+    try:
+        chromeDriverPath = chromedriver_autoinstaller.install()
+        print(f"chromedriver_autoinstaller returned: {chromeDriverPath}")
+    except Exception as e:
+        print("chromedriver_autoinstaller.install() failed:", e)
+        # Fallback to any chromedriver on PATH (useful if autoinstaller can't run)
+        chromeDriverPath = shutil.which("chromedriver")
+        if chromeDriverPath:
+            print(f"Falling back to chromedriver on PATH: {chromeDriverPath}")
+        else:
+            raise Exception("No chromedriver available (autoinstaller failed and no chromedriver on PATH)") from e
 
-def getExcelFile(year, month):
-    # if year is not in the combobox options, set year to default value
-    if year not in years:
-        year = defaultYear
-    # if month is not in the combobox options, set month to default value
-    if month not in months:
-        month = defaultMonth
-
-    chromeDriverPath = chromedriver_autoinstaller.install()
-    service = Service(executable_path=f"{chromeDriverPath}")
+    service = Service(executable_path=str(chromeDriverPath))
+    print("Chrome driver service created")
     options = webdriver.ChromeOptions()
+    # Use the new headless flag for recent Chrome versions
     if headless:
-        options.add_argument("--headless")
-    else:
-        options.add_argument("--disable-headless-mode")
-    # if the driver version is not up to date, download the latest version from the link below
-    # https://googlechromelabs.github.io/chrome-for-testing/
+        options.add_argument("--headless=new")
+    # keep default (non-headless) otherwise; remove invalid flag
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+
     try:
         driver = webdriver.Chrome(service=service, options=options)
+        print("driver initialized successfully")
+        return driver
     except Exception as e:
         print("Error initializing Chrome driver: ", e)
-
-    # go to url
-    driver.get("https://www.max.co.il/login")
-
+        return None
+    
+def connectToMax(driver):
     # wait until the pop up window shows
     try:
         print("Waiting for the pop-up window to appear")
@@ -113,6 +123,7 @@ def getExcelFile(year, month):
     except Exception:
         print("ID input field did not appear, continuing without it")
 
+def goToMaxTransactionDetails(driver, year, month):
     # go to transaction details
     print("Going to transaction details")
     if month == "12":
@@ -129,7 +140,8 @@ def getExcelFile(year, month):
         + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a"
     )
 
-    # wait until the pop up window came up
+def downloadMaxExcelFile(driver, year, month):
+    # wait until the download button comes up
     try:
         print("Waiting for the download button to appear")
         WebDriverWait(driver, 10).until(
@@ -143,8 +155,14 @@ def getExcelFile(year, month):
         print("Error: ", e)
         driver.save_screenshot("screenshot.png")
         raise Exception("Failed to download the excel file")
-
+    
+def getDealTable(driver):
     try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 
+                                            "app-table.ng-star-inserted:nth-child(6) > div:nth-child(1)"))
+        )
+        print("Deal table appeared")
         dealTable = driver.find_element(
             By.CSS_SELECTOR,
             "app-table.ng-star-inserted:nth-child(6) > div:nth-child(1)",
@@ -162,167 +180,14 @@ def getExcelFile(year, month):
         driver.save_screenshot("deal_table_screenshot.png")
         raise Exception("Deal table not found, check the screenshot")
 
-    time.sleep(5)
-
-    # driver.get("https://start.telebank.co.il/login/#/LOGIN_PAGE")
-
-    # # maximize the window
-    # driver.maximize_window()
-
-    # # wait for the form to load
-    # try:
-    #     print("Waiting for the Discount Bank login form to appear")
-    #     WebDriverWait(driver, 10).until(
-    #         EC.presence_of_element_located((By.ID, "loginForm"))
-    #     )
-    #     print("Discount Bank login form appeared")
-    # except Exception as e:
-    #     print("Error: ", e)
-    #     driver.save_screenshot("discount_bank_login_form_screenshot.png")
-    #     raise Exception("Failed to load Discount Bank login form")
-
-    # # input id
-    # bank_id_input = driver.find_element(By.ID, "tzId")
-    # bank_id_input.send_keys(id)
-
-    # # input password
-    # bank_password_input = driver.find_element(By.ID, "tzPassword")
-    # bank_password_input.send_keys(bank_password)
-
-    # # bank id code
-    # bank_id_code_input = driver.find_element(By.ID, "aidnum")
-    # bank_id_code_input.send_keys(bank_id_code)
-
-    # bank_id_code_input.send_keys(Keys.ENTER)
-
-    # WebDriverWait(driver, 10).until(
-    #     EC.presence_of_element_located(
-    #         (By.XPATH, '//*[@id="login-page"]/div/form/div[3]/button')
-    #     )
-    # )
-    # driver.find_element(
-    #     By.XPATH, '//*[@id="login-page"]/div/form/div[3]/button'
-    # ).click()
-
-    # time.sleep(5)
-    # # wait for the transactions page to load
-
-    # driver.get("https://start.telebank.co.il/apollo/retail/#/OSH_LENTRIES_ALTAMIRA")
-
-    # try:
-    #     print("Waiting for the transactions table to appear")
-    #     WebDriverWait(driver, 10).until(
-    #         EC.presence_of_element_located(
-    #             (By.CSS_SELECTOR, ".advanced-search-btn-icon")
-    #         )
-    #     )
-    #     print("Transactions table appeared")
-    # except Exception as e:
-    #     print("Error: ", e)
-    #     driver.save_screenshot("transactions_table_screenshot.png")
-    #     raise Exception("Failed to load transactions table")
-
-    # # click on the advanced search button
-    # try:
-    #     print("Clicking on the advanced search button")
-    #     WebDriverWait(driver, 10).until(
-    #         EC.element_to_be_clickable(
-    #             (By.XPATH, '//*[@id="advanced-search-window-btn"]/button/span[2]')
-    #         )
-    #     )
-    #     advanced_search_button = driver.find_element(
-    #         By.XPATH, '//*[@id="advanced-search-window-btn"]/button/span[2]'
-    #     )
-    #     advanced_search_button.click()
-    #     print("Advanced search button clicked")
-    # except Exception as e:
-    #     print("Error clicking advanced search button: ", e)
-    #     driver.save_screenshot("advanced_search_button_screenshot.png")
-    #     raise Exception("Failed to click on the advanced search button")
-
-    # try:
-    #     print("Waiting for the pop-up to appear")
-    #     WebDriverWait(driver, 10).until(
-    #         EC.presence_of_element_located((By.ID, "fromDate"))
-    #     )
-    #     print("Pop-up appeared")
-    # except Exception as e:
-    #     print("Error: ", e)
-    #     driver.save_screenshot("popup_screenshot.png")
-    #     raise Exception("Failed to load the pop-up")
-
-    # # input the date range
-    # from_date_input = driver.find_element(By.ID, "fromDate")
-    # from_date_input.click()
-    # time.sleep(0.5)
-    # year_input = driver.find_element(
-    #     By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)"
-    # )
-    # year_input_text = year_input.get_attribute("text")
-    # print(year_input_text)
-    # time.sleep(10)
-    # if year_input_text == year:
-    #     year_input.click()
-    #     driver.find_element(
-    #         By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)"
-    #     ).click()
-    #     if month % 3 == 0:
-    #         col = 3
-    #     elif month % 3 == 1:
-    #         col = 1
-    #     else:
-    #         col = 2
-    #     if month <= 3:
-    #         row = 1
-    #     elif month <= 6:
-    #         row = 2
-    #     elif month <= 9:
-    #         row = 3
-    #     else:
-    #         row = 4
-    #     driver.find_element(
-    #         By.CSS_SELECTOR,
-    #         f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)",
-    #     ).click()
-    #     time.sleep(0.5)
-    #     driver.find_element(
-    #         By.CSS_SELECTOR,
-    #         "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)",
-    #     ).click()
-    #     time.sleep(0.5)
-    #     driver.find_element(By.ID, "oshTransfersAdvancedSearchDateTO").click()
-    #     year_input = driver.find_element(
-    #         By.CSS_SELECTOR, "button.current:nth-child(3) > span:nth-child(1)"
-    #     )
-    #     if year_input.value_of_css_property("innerText") == year:
-    #         year_input.click()
-    #         driver.find_element(
-    #             By.CSS_SELECTOR, "button.current:nth-child(2) > span:nth-child(1)"
-    #         ).click()
-    #         col += 1
-    #         if col > 3 and row < 4:
-    #             col = 1
-    #             row += 1
-    #         driver.find_element(
-    #             By.CSS_SELECTOR,
-    #             f"tr.ng-star-inserted:nth-child({row}) > td:nth-child({col}) > span:nth-child(1)",
-    #         ).click()
-    #         time.sleep(0.5)
-    #         driver.find_element(
-    #             By.CSS_SELECTOR,
-    #             "tr.ng-star-inserted:nth-child(2) > td:nth-child(3) > span:nth-child(1)",
-    #         ).click()
-    #         time.sleep(0.5)
-    #         driver.find_element(By.CSS_SELECTOR, "button.advanced-search-btn").click()
-
-    # time.sleep(10)
-
+def closeDriver(driver):
     try:
         driver.quit()
         print("Driver closed successfully")
     except Exception as e:
         print("Error closing the driver: ", e)
 
+def saveExcelFile(year, month):
     downloads_path = str(Path.home() / "Downloads")
     destination_path = ""
 
@@ -342,3 +207,47 @@ def getExcelFile(year, month):
         "foreign_exchange_transactions.html", "transactions.csv"
     )
     parse_amount("transactions.csv", target_file)
+
+def goToMax(driver):
+    # go to url
+    try:
+        driver.get("https://www.max.co.il/login")
+    except Exception as e:
+        print("Error navigating to Max login page: ", e)
+        driver.quit()
+        return
+    print("driver initialized, navigating to Max login page")
+    
+    connectToMax(driver)
+
+def getExcelFile(year, month):
+    year, month = checkDate(year, month)
+    print(f"date = {year}-{month}")
+
+    driver = initializeDriver()
+
+    goToMax(driver)
+
+    goToMaxTransactionDetails(driver, year, month)
+
+    downloadMaxExcelFile(driver, year, month)
+
+    getDealTable(driver)
+
+    time.sleep(5)
+
+    goToDiscount(driver)
+
+    goToDiscountTransactionDetails(driver)
+    # Get 3 months back transactions excel
+    # Get the relevant timeframe - 10.{month} - 9.{month+1}
+    # Check for the next keywords: משיכת שיק, החזר דיסקונט, הפקדת שיק, העברה ל, העברה מ, עמלת פעולה, אלטשולר שח, טפחות-משכנ, טפחות ס.בי, הע. ל, ביטוח לאומי - ילדים, מופ"ת, נאנומושן, הו"ק למיטב, עמלת סמס, 
+    #
+
+    downloadDiscountExcelFile(driver)
+
+    manipulateDiscountExcelFile(year, month)
+
+    closeDriver(driver)
+
+    saveExcelFile(year, month)

@@ -1,6 +1,6 @@
 from tkinter import *
 from tkinter import filedialog, ttk, messagebox
-from getExcelFileFromMax import getExcelFile, toggleHeadless, getExcelFileThreaded
+from getExcelFileFromMax import toggleHeadless, getExcelFileThreaded
 from handleExcel import getExpenses, fillCells
 from threading import Thread
 
