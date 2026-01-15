@@ -236,17 +236,17 @@ def getExcelFile(year, month):
 
     time.sleep(5)
 
-    goToDiscount(driver)
+    # goToDiscount(driver)
 
-    goToDiscountTransactionDetails(driver)
+    # goToDiscountTransactionDetails(driver)
     # Get 3 months back transactions excel
     # Get the relevant timeframe - 10.{month} - 9.{month+1}
     # Check for the next keywords: משיכת שיק, החזר דיסקונט, הפקדת שיק, העברה ל, העברה מ, עמלת פעולה, אלטשולר שח, טפחות-משכנ, טפחות ס.בי, הע. ל, ביטוח לאומי - ילדים, מופ"ת, נאנומושן, הו"ק למיטב, עמלת סמס, 
     #
 
-    downloadDiscountExcelFile(driver)
+    # downloadDiscountExcelFile(driver)
 
-    manipulateDiscountExcelFile(year, month)
+    # manipulateDiscountExcelFile(year, month)
 
     closeDriver(driver)
 
