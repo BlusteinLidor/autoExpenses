@@ -1,4 +1,8 @@
-https://googlechromelabs.github.io/chrome-for-testing/#stable
 openpyxl
-chromedriver_autoinstaller
+webdriver-manager
 selenium
+python-dotenv
+openai
+beautifulsoup4
+pandas
+matplotlib

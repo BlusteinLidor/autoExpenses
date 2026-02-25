@@ -9,7 +9,7 @@ import os
 from dotenv import load_dotenv
 from data import *
 from threading import Thread
-import chromedriver_autoinstaller
+from webdriver_manager.chrome import ChromeDriverManager
 from get_for_ex_trans import get_foreign_exchange_transactions
 from add_rows_to_csv import parse_amount
 import shutil
@@ -43,37 +43,20 @@ def getExcelFileThreaded(year, month):
 
 def initializeDriver():
     print("Initializing Chrome driver")
-    # Ensure chromedriver_autoinstaller will provide the matching driver for the current Chrome.
-    # chromedriver_autoinstaller.install() returns the path to the chromedriver executable
-    # and will only download when the matching driver isn't already present.
-    try:
-        chromeDriverPath = chromedriver_autoinstaller.install()
-        print(f"chromedriver_autoinstaller returned: {chromeDriverPath}")
-    except Exception as e:
-        print("chromedriver_autoinstaller.install() failed:", e)
-        # Fallback to any chromedriver on PATH (useful if autoinstaller can't run)
-        chromeDriverPath = shutil.which("chromedriver")
-        if chromeDriverPath:
-            print(f"Falling back to chromedriver on PATH: {chromeDriverPath}")
-        else:
-            raise Exception("No chromedriver available (autoinstaller failed and no chromedriver on PATH)") from e
-
-    service = Service(executable_path=str(chromeDriverPath))
-    print("Chrome driver service created")
+    # Use webdriver-manager to get a ChromeDriver that matches the installed Chrome version.
     options = webdriver.ChromeOptions()
-    # Use the new headless flag for recent Chrome versions
     if headless:
         options.add_argument("--headless=new")
-    # keep default (non-headless) otherwise; remove invalid flag
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
 
     try:
+        service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        print("driver initialized successfully")
+        print("Driver initialized successfully")
         return driver
     except Exception as e:
-        print("Error initializing Chrome driver: ", e)
+        print("Error initializing Chrome driver:", e)
         return None
     
 def connectToMax(driver):
@@ -181,11 +164,13 @@ def getDealTable(driver):
         raise Exception("Deal table not found, check the screenshot")
 
 def closeDriver(driver):
+    if driver is None:
+        return
     try:
         driver.quit()
         print("Driver closed successfully")
     except Exception as e:
-        print("Error closing the driver: ", e)
+        print("Error closing the driver:", e)
 
 def saveExcelFile(year, month):
     downloads_path = str(Path.home() / "Downloads")
@@ -209,24 +194,32 @@ def saveExcelFile(year, month):
     parse_amount("transactions.csv", target_file)
 
 def goToMax(driver):
+    if driver is None:
+        print("Cannot navigate: Chrome driver failed to initialize (check Chrome/ChromeDriver version match).")
+        return False
     # go to url
     try:
         driver.get("https://www.max.co.il/login")
     except Exception as e:
         print("Error navigating to Max login page: ", e)
-        driver.quit()
-        return
+        if driver is not None:
+            driver.quit()
+        return False
     print("driver initialized, navigating to Max login page")
-    
     connectToMax(driver)
+    return True
 
 def getExcelFile(year, month):
     year, month = checkDate(year, month)
     print(f"date = {year}-{month}")
 
     driver = initializeDriver()
+    if driver is None:
+        print("Stopping: Chrome driver could not be started. Update Chrome to the latest version or use a ChromeDriver that matches your Chrome (e.g. 144).")
+        return
 
-    goToMax(driver)
+    if not goToMax(driver):
+        return  # goToMax already logged (driver init failed or navigation error)
 
     goToMaxTransactionDetails(driver, year, month)
 

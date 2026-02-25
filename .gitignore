@@ -5,7 +5,7 @@ venv/
 build/
 dist/
 /ui.spec
-ui.exe
+*.exe
 errors.txt
 screenshot.png
 pop_up_window_screenshot.png

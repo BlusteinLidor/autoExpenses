@@ -7,6 +7,28 @@ from data import *
 expensesDict = {}
 
 
+def parse_category_totals(openAIOutput):
+    """Parse expensesSorted output into category -> total amount. Returns (dict, num_transactions)."""
+    category_totals = {}
+    num_transactions = 0
+    eachLineList = openAIOutput.split("\n")
+    for val in eachLineList:
+        val = val.strip()
+        if not val:
+            continue
+        expenseNameCostCategory = val.rsplit(" - ", 2)
+        if len(expenseNameCostCategory) != 3:
+            continue
+        try:
+            cost = float(expenseNameCostCategory[1])
+            category = expenseNameCostCategory[2]
+            category_totals[category] = category_totals.get(category, 0) + cost
+            num_transactions += 1
+        except (ValueError, IndexError):
+            continue
+    return category_totals, num_transactions
+
+
 def getExpenses(workbook_path):
     # load the excel workbook
     wb = load_workbook(workbook_path)
@@ -47,16 +69,17 @@ def getExpenses(workbook_path):
         # go to the next row
         categoryRow += 1
 
-    file = open("expensesDict.txt", "w")
+    file = open("expensesDict.txt", "w", encoding="utf-8")
 
     expensesSorted = sortExpensesAI(expensesDict)
+    category_totals, num_transactions = parse_category_totals(expensesSorted)
 
     file.write(
         str(expensesDict) + "\n" + expensesSorted + "\n Total cost: " + str(totalCost)
     )
     file.close()
 
-    return expensesSorted
+    return expensesSorted, category_totals, num_transactions
 
 
 # @TODO add the expenses to the final excel file - go through each line in chat's response, for each line, check the name of the expense and it's cost, add the cost to a
@@ -87,8 +110,13 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
     eachLineList = openAIOutput.split("\n")
     # for each line
     for val in eachLineList:
+        val = val.strip()
+        if not val:
+            continue
         # for each expense - cost - category part, split between the expense, cost and category
         expenseNameCostCategory = val.rsplit(" - ", 2)
+        if len(expenseNameCostCategory) != 3:
+            continue
         # add each [expenseName, cost, category] tuple to a dict
         expenseNameCostCategoryDict.update(
             {
@@ -143,7 +171,7 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
                 + "\n"
             )
 
-    file = open("errors.txt", "w")
+    file = open("errors.txt", "w", encoding="utf-8")
     file.write(errorString)
     file.close()
 
