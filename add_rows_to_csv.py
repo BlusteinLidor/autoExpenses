@@ -39,7 +39,7 @@ def parse_amount(
                     .replace("\u200f", "")
                     .strip()
                 )
-                value = float(value) if value else 0.0
+                value = abs(float(value)) if value else 0.0
                 print(f"Parsed value: {value}")
                 added_amount += float(value)
                 ws.cell(row=first_empty_row + i, column=6, value=value)
@@ -49,7 +49,7 @@ def parse_amount(
     totalAmountCell = ws[f"A{total_amount_row + i + 1}"]
     totalAmountValue = totalAmountCell.value
     totalAmountParsed = totalAmountValue.replace("₪", "").replace(",", "").strip()
-    floatTotalAmount = float(totalAmountParsed) + added_amount
+    floatTotalAmount = abs(float(totalAmountParsed)) + added_amount
     print(f"Total amount parsed: {floatTotalAmount}")
     print(f"Added amount: {added_amount}")
     print(f"New total amount: {floatTotalAmount}")

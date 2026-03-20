@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AutoExpenses</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>AutoExpenses</h1>
+
+      <div class="controls card">
+        <div class="row">
+          <label>
+            Year
+            <select id="year"></select>
+          </label>
+          <label>
+            Month
+            <select id="month"></select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="includeLeumi" checked />
+            Run with Leumi
+          </label>
+        </div>
+
+        <div class="row">
+          <button id="runBtn" class="primary">Run for month</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="lastFilled" class="muted"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>Spending by Category</h2>
+          <canvas id="summaryChart" height="280"></canvas>
+        </div>
+
+        <div class="card">
+          <h2>Net Worth (simple)</h2>
+
+          <div class="kv">
+            <div class="muted">Leumi balance</div>
+            <div id="leumiBalance" class="value">-</div>
+          </div>
+
+          <hr />
+
+          <h3>Cars</h3>
+          <div id="carsList" class="list"></div>
+          <div class="form">
+            <input id="carName" placeholder="Car name (e.g. 'Toyota Yaris')" />
+            <input id="carValue" placeholder="Value (e.g. 25000)" inputmode="decimal" />
+            <button id="addCarBtn" class="secondary">Add car</button>
+          </div>
+
+          <hr />
+
+          <h3>Investments</h3>
+          <div id="investmentsList" class="list"></div>
+          <div class="form">
+            <input
+              id="investmentName"
+              placeholder="Investment name (e.g. 'Bitcoin')"
+            />
+            <input
+              id="investmentValue"
+              placeholder="Value (e.g. 5000)"
+              inputmode="decimal"
+            />
+            <button id="addInvestmentBtn" class="secondary">Add investment</button>
+          </div>
+
+          <div class="totals">
+            <div class="muted">Cars total</div>
+            <div id="carsTotal" class="value">0</div>
+            <div class="muted">Investments total</div>
+            <div id="investmentsTotal" class="value">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

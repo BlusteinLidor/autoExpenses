@@ -15,3 +15,7 @@ transactions.csv
 *.png
 *.xlsx
 todo
+data/
+chromedriver.exe
+expensesDict.txt
+.cursor/

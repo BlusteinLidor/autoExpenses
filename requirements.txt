@@ -1,4 +1,10 @@
-https://googlechromelabs.github.io/chrome-for-testing/#stable
-openpyxl
-chromedriver_autoinstaller
-selenium
+# https://googlechromelabs.github.io/chrome-for-testing/#stable
+openpyxl>=3.1,<4
+python-dotenv>=1.0,<2
+beautifulsoup4>=4.12,<5
+pandas>=2.0,<3
+openai>=1.0,<2
+playwright>=1.49,<2
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+# xlrd>=2.0.1  # optional: for real .xls (Leumi exports are HTML saved as .xls; we parse with BeautifulSoup)

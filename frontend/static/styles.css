@@ -1,0 +1,184 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f6f7fb;
+  color: #111;
+}
+
+.container {
+  max-width: 1100px;
+  padding: 18px;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 14px 0;
+  font-size: 22px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e7e9f0;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.controls .row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+select,
+input {
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.primary {
+  background: #2f6fed;
+  color: white;
+  border: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.secondary {
+  background: #f1f3f8;
+  color: #111;
+  border: 1px solid #e0e3ee;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.danger {
+  background: #fff1f1;
+  color: #b00020;
+  border: 1px solid #ffd0d0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.muted {
+  color: #666;
+  font-size: 13px;
+}
+
+.status {
+  margin-top: 8px;
+  min-height: 18px;
+  color: #111;
+  font-size: 13px;
+}
+
+.status-error {
+  color: #b00020;
+}
+
+.status-ok {
+  color: #0a7a0a;
+}
+
+.grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.list {
+  margin: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #eef0f6;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.list-title {
+  font-weight: 600;
+}
+
+.list-sub {
+  color: #444;
+  font-size: 13px;
+}
+
+.form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form input {
+  min-width: 220px;
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  margin-top: 12px;
+}
+

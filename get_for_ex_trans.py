@@ -2,6 +2,32 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 
+def get_immediate_transactions(
+    htmlFilePath="immediate_transactions.html", outputCsvPath="transactions.csv"
+):
+    # Load the HTML content (you can also read from a file)
+    with open(htmlFilePath, encoding="utf-8") as f:
+        html = f.read()
+
+    soup = BeautifulSoup(html, "html.parser")
+    data = []
+    rows = soup.select("div.row.body")
+    for row in rows:
+        merchant = row.select_one(".cell.name .text")
+        category = row.select_one(".cell.category")
+        amount = row.select_one(".cell.sum .ltr-sum")
+        data.append(
+            {
+                "שם בית העסק": merchant.text.strip() if merchant else "",
+                "קטגוריה": category.text.strip() if category else "",
+                "סכום חיוב": amount.text.strip() if amount else "",
+            }
+        )
+
+    df = pd.DataFrame(data)
+    df.to_csv(outputCsvPath, index=False, encoding="utf-8-sig")
+
+
 def get_foreign_exchange_transactions(
     htmlFilePath="foreign_exchange_transactions.html", outputCsvPath="transactions.csv"
 ):
