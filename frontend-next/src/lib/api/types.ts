@@ -1,0 +1,67 @@
+export type AssetItem = {
+  name: string;
+  value: number;
+};
+
+export type AppState = {
+  last_filled_year?: number | string;
+  last_filled_month?: number | string;
+  leumi_balance?: number | string;
+  cars?: AssetItem[];
+  investments?: AssetItem[];
+};
+
+export type AssetsResponse = {
+  cars: AssetItem[];
+  investments: AssetItem[];
+  leumi_balance: number | string | null;
+};
+
+export type ReviewItem = {
+  name: string;
+  cost: number;
+  category: string;
+  is_possible_duplicate: boolean;
+};
+
+export type PrepareRunResponse = {
+  run_token: string;
+  review_token: string;
+  source_excel: string;
+  output_excel: string;
+  allowed_categories: string[];
+  items: ReviewItem[];
+  parse_errors: string[];
+};
+
+export type FinalizeRunResponse = {
+  output_excel: string;
+  state: AppState;
+};
+
+export type ProgressResponse = {
+  step: string;
+  updated_at: string | null;
+  done: boolean;
+};
+
+export type ExpensesSummary = Record<string, number>;
+
+export type PrepareRunPayload = {
+  year: string;
+  month: number;
+  include_leumi: boolean;
+  run_token: string;
+};
+
+export type FinalizeRunItem = {
+  name: string;
+  cost: number;
+  category: string;
+};
+
+export type FinalizeRunPayload = {
+  run_token: string;
+  review_token: string;
+  reviewed_items: FinalizeRunItem[];
+};

@@ -74,6 +74,68 @@ def _closest_category(raw_category: str, allowed_categories: list[str]) -> str:
     return best
 
 
+def _create_category_combobox(
+    parent,
+    text_var: StringVar,
+    allowed_categories: list[str],
+    width: int = 45,
+):
+    """
+    Create a category combobox that allows typing with prefix autocomplete,
+    while keeping choices constrained to the provided categories.
+    """
+    combo = ttk.Combobox(
+        parent,
+        values=allowed_categories,
+        textvariable=text_var,
+        width=width,
+        state="normal",
+    )
+
+    def _apply_canonical_case_if_exact():
+        typed = str(text_var.get() or "").strip()
+        for cat in allowed_categories:
+            if typed == cat:
+                return
+            if typed.casefold() == cat.casefold():
+                text_var.set(cat)
+                return
+
+    def _autocomplete_on_keyrelease(event):
+        typed_raw = str(text_var.get() or "")
+        typed = typed_raw.strip()
+        if not typed:
+            combo.configure(values=allowed_categories)
+            return
+
+        # Narrow dropdown options while typing.
+        narrowed = [
+            cat for cat in allowed_categories if typed.casefold() in cat.casefold()
+        ]
+        combo.configure(values=narrowed or allowed_categories)
+
+        # Prefix autocomplete to the first match.
+        prefix_matches = [
+            cat for cat in allowed_categories if cat.casefold().startswith(typed.casefold())
+        ]
+        if prefix_matches:
+            best = prefix_matches[0]
+            if best.casefold() != typed.casefold():
+                text_var.set(best)
+                combo.icursor(len(typed))
+                combo.selection_range(len(typed), END)
+            else:
+                _apply_canonical_case_if_exact()
+
+    def _restore_options_on_focus_in(_event):
+        combo.configure(values=allowed_categories)
+
+    combo.bind("<KeyRelease>", _autocomplete_on_keyrelease)
+    combo.bind("<FocusIn>", _restore_options_on_focus_in)
+    combo.bind("<<ComboboxSelected>>", lambda _e: _apply_canonical_case_if_exact())
+    return combo
+
+
 def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
     parsed_items, parse_errors = parse_ai_output_lines(ai_output)
     allowed_categories = get_allowed_categories(str(output_path))
@@ -198,12 +260,11 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                 Entry(frame, textvariable=part_cost_vars[part_no - 1], width=12).grid(
                     row=part_no, column=1, sticky=W, padx=6, pady=2
                 )
-                combo = ttk.Combobox(
-                    frame,
-                    values=allowed_categories,
-                    textvariable=part_cat_vars[part_no - 1],
+                combo = _create_category_combobox(
+                    parent=frame,
+                    text_var=part_cat_vars[part_no - 1],
+                    allowed_categories=allowed_categories,
                     width=45,
-                    state="readonly",
                 )
                 combo.grid(row=part_no, column=2, sticky=W, padx=6, pady=2)
 
@@ -221,12 +282,11 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
 
             default_category = _closest_category(item["category"], allowed_categories)
             var = StringVar(value=default_category)
-            combo = ttk.Combobox(
-                scrollable,
-                values=allowed_categories,
-                textvariable=var,
+            combo = _create_category_combobox(
+                parent=scrollable,
+                text_var=var,
+                allowed_categories=allowed_categories,
                 width=45,
-                state="readonly",
             )
             combo.grid(row=i, column=2, sticky=W, padx=6, pady=3)
             category_vars.append(var)
@@ -271,12 +331,11 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
 
             default_category = _closest_category(item["category"], allowed_categories)
             var = StringVar(value=default_category)
-            combo = ttk.Combobox(
-                scrollable,
-                values=allowed_categories,
-                textvariable=var,
+            combo = _create_category_combobox(
+                parent=scrollable,
+                text_var=var,
+                allowed_categories=allowed_categories,
                 width=45,
-                state="readonly",
             )
             combo.grid(row=j, column=2, sticky=W, padx=6, pady=3)
             duplicate_category_vars.append(var)
@@ -289,6 +348,7 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
     def apply_and_fill():
         reviewed_items = []
         excluded_regular = 0
+        allowed_set = set(allowed_categories)
 
         def _parse_cost_entry(s: str) -> float:
             try:
@@ -321,6 +381,13 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                         part_cat = str(catv.get() if catv is not None else "").strip()
                         if not part_cat and allowed_categories:
                             part_cat = allowed_categories[0]
+                        if part_cat not in allowed_set:
+                            messagebox.showerror(
+                                "Failure",
+                                f"Invalid category for '{item['name']}' part {part_no}: '{part_cat}'.\n"
+                                "Please choose a category from the list.",
+                            )
+                            return
 
                         if part_cost > 0:
                             any_added = True
@@ -339,11 +406,19 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                         )
                         return
                 else:
+                    picked_category = str(category_vars[idx].get() or "").strip()
+                    if picked_category not in allowed_set:
+                        messagebox.showerror(
+                            "Failure",
+                            f"Invalid category for '{item['name']}': '{picked_category}'.\n"
+                            "Please choose a category from the list.",
+                        )
+                        return
                     reviewed_items.append(
                         {
                             "name": item["name"],
                             "cost": item["cost"],
-                            "category": category_vars[idx].get(),
+                            "category": picked_category,
                         }
                     )
             else:
@@ -352,12 +427,20 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
         included_duplicates = 0
         for idx, item in enumerate(duplicate_items):
             if duplicate_add_vars[idx].get():
+                picked_category = str(duplicate_category_vars[idx].get() or "").strip()
+                if picked_category not in allowed_set:
+                    messagebox.showerror(
+                        "Failure",
+                        f"Invalid category for '{item['name']}': '{picked_category}'.\n"
+                        "Please choose a category from the list.",
+                    )
+                    return
                 included_duplicates += 1
                 reviewed_items.append(
                     {
                         "name": item["name"],
                         "cost": item["cost"],
-                        "category": duplicate_category_vars[idx].get(),
+                        "category": picked_category,
                     }
                 )
 

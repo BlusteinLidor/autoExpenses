@@ -19,3 +19,8 @@ data/
 chromedriver.exe
 expensesDict.txt
 .cursor/
+/frontend-next/.next/
+/frontend-next/node_modules/
+/frontend-next/out/
+/frontend-next/.env*
+/frontend-next/*.tsbuildinfo

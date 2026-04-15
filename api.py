@@ -29,9 +29,13 @@ _PIPELINE_PROGRESS: Dict[str, Dict[str, Any]] = {}
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 STATIC_DIR = FRONTEND_DIR / "static"
+NEXT_OUT_DIR = BASE_DIR / "frontend-next" / "out"
+NEXT_ASSETS_DIR = NEXT_OUT_DIR / "_next"
 
 # Serve the web UI (index.html) + its static assets from /static/*
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+if NEXT_ASSETS_DIR.exists():
+    app.mount("/_next", StaticFiles(directory=str(NEXT_ASSETS_DIR)), name="next-assets")
 
 
 def _user_friendly_pipeline_error_message(error: Exception) -> str:
@@ -76,6 +80,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.get("/")
 def index() -> FileResponse:
+    next_index = NEXT_OUT_DIR / "index.html"
+    if next_index.exists():
+        return FileResponse(str(next_index))
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
@@ -294,9 +301,47 @@ def read_assets() -> Dict[str, Any]:
 
 @app.get("/expenses/summary")
 def expenses_summary(year: int, month: int) -> Dict[str, float]:
-    """
-    Summarize expenses by category for a given year/month.
-    """
+    """Summarize expenses by category for a given year/month."""
+    return _summarize_sheet_row_ranges(
+        year=year,
+        month=month,
+        row_ranges=[
+            (17, 45),  # Rows 17-44
+            (49, 91),  # Rows 49-90
+        ],
+    )
+
+
+@app.get("/income/summary")
+def income_summary(year: int, month: int) -> Dict[str, float]:
+    """Summarize income by category for a given year/month."""
+    return _summarize_sheet_row_ranges(
+        year=year,
+        month=month,
+        row_ranges=[
+            (6, 13),  # Rows 6-12
+        ],
+    )
+
+
+@app.get("/investments/summary")
+def investments_summary(year: int, month: int) -> Dict[str, float]:
+    """Summarize investment rows by category for a given year/month."""
+    return _summarize_sheet_row_ranges(
+        year=year,
+        month=month,
+        row_ranges=[
+            (95, 105),  # Rows 95-104
+        ],
+    )
+
+
+def _summarize_sheet_row_ranges(
+    *,
+    year: int,
+    month: int,
+    row_ranges: list[tuple[int, int]],
+) -> Dict[str, float]:
     paths = get_paths()
 
     month_padded = str(month).zfill(2)
@@ -317,34 +362,54 @@ def expenses_summary(year: int, month: int) -> Dict[str, float]:
         return {}
     col_letter = monthToExpenseColDict[month]
 
-    first_row = 17
-    last_row = 105
     category_col = "B"
-
     summary: Dict[str, float] = {}
-    for row in range(first_row, last_row):
-        category = ws[f"{category_col}{row}"].value
-        if not category:
-            continue
-        cell = ws[f"{col_letter}{row}"]
-        raw_value = cell.value
-        if raw_value is None or raw_value == "":
-            continue
-
-        amount: float | None = None
-        if isinstance(raw_value, Number):
-            amount = float(raw_value)
-        elif isinstance(raw_value, str):
-            # Some template rows in month columns may contain labels (e.g., month names).
-            normalized = raw_value.replace(",", "").strip()
-            try:
-                amount = float(normalized)
-            except ValueError:
+    for first_row, last_row_exclusive in row_ranges:
+        for row in range(first_row, last_row_exclusive):
+            category = ws[f"{category_col}{row}"].value
+            if not category:
+                continue
+            cell = ws[f"{col_letter}{row}"]
+            raw_value = cell.value
+            if raw_value is None or raw_value == "":
                 continue
 
-        if amount is not None:
-            summary[str(category)] = summary.get(str(category), 0.0) + amount
+            amount: float | None = None
+            if isinstance(raw_value, Number):
+                amount = float(raw_value)
+            elif isinstance(raw_value, str):
+                # Some template rows in month columns may contain labels (e.g., month names).
+                normalized = raw_value.replace(",", "").strip()
+                try:
+                    amount = float(normalized)
+                except ValueError:
+                    continue
+
+            if amount is not None:
+                summary[str(category)] = summary.get(str(category), 0.0) + amount
 
     return summary
+
+
+@app.get("/{asset_path:path}")
+def next_export_assets(asset_path: str) -> FileResponse:
+    """
+    Serve static files from Next export output when available.
+    Keeps legacy behavior by falling back to the old frontend index
+    only for root route (handled above).
+    """
+    if not asset_path:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    candidate = NEXT_OUT_DIR / asset_path
+    if candidate.is_file():
+        return FileResponse(str(candidate))
+
+    # Support exported folder routes (e.g. /foo -> /foo/index.html).
+    folder_index = candidate / "index.html"
+    if folder_index.is_file():
+        return FileResponse(str(folder_index))
+
+    raise HTTPException(status_code=404, detail="Not found")
 
 
