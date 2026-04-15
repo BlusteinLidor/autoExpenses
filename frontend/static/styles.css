@@ -154,6 +154,20 @@ input {
   gap: 4px;
 }
 
+.list-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.list-edit-row {
+  margin-top: 2px;
+}
+
+.asset-edit-input {
+  width: 160px;
+}
+
 .list-title {
   font-weight: 600;
 }
@@ -180,5 +194,85 @@ input {
   grid-template-columns: 1fr auto;
   gap: 6px 10px;
   margin-top: 12px;
+}
+
+#reviewPanel {
+  margin-top: 14px;
+}
+
+.review-table-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.review-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.review-table th,
+.review-table td {
+  border-bottom: 1px solid #eef0f6;
+  padding: 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.review-table th {
+  font-size: 13px;
+  color: #444;
+}
+
+.review-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.review-category {
+  min-width: 260px;
+}
+
+.review-warning {
+  margin-top: 4px;
+  color: #a16500;
+}
+
+.split-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.split-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.split-label {
+  min-width: 52px;
+  font-size: 13px;
+  color: #444;
+}
+
+.split-amount {
+  width: 110px;
+}
+
+.split-category {
+  min-width: 260px;
+}
+
+.split-actions {
+  display: flex;
+  gap: 8px;
 }
 

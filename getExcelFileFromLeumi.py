@@ -2,11 +2,79 @@ from datetime import datetime
 import os
 from pathlib import Path
 from typing import Optional, Tuple
+import traceback
 
 from playwright.sync_api import sync_playwright, Page, BrowserContext
 
 from config import get_paths, load_env, validate_env, update_state
 from utils import checkDate
+
+
+def _dismiss_intercepting_overlays(page: Page) -> None:
+    # Remove common overlays/popups that can intercept export clicks.
+    try:
+        page.evaluate(
+            """
+            () => {
+                const selectors = [
+                    '.app-cookies-overlay',
+                    '.cdk-overlay-backdrop',
+                    '.modal-backdrop',
+                    '.block-ui-wrapper',
+                    '.loading-overlay',
+                ];
+                for (const selector of selectors) {
+                    document.querySelectorAll(selector).forEach((el) => el.remove());
+                }
+            }
+            """
+        )
+    except Exception:
+        pass
+
+
+def _ensure_clickable(page: Page, button_label: str, timeout_ms: int = 15000) -> None:
+    _dismiss_intercepting_overlays(page)
+    page.wait_for_load_state("networkidle")
+    button = page.get_by_title(button_label, exact=True).first
+    button.wait_for(state="visible", timeout=timeout_ms)
+    button.scroll_into_view_if_needed()
+    button.click(trial=True, timeout=timeout_ms)
+    coverage_info = button.evaluate(
+        """
+        (el) => {
+            const rect = el.getBoundingClientRect();
+            const cx = rect.left + (rect.width / 2);
+            const cy = rect.top + (rect.height / 2);
+            const top = document.elementFromPoint(cx, cy);
+            const uncovered = !top || top === el || el.contains(top);
+            return {
+                uncovered,
+                blocker: uncovered ? null : ((top.outerHTML || '').slice(0, 220)),
+            };
+        }
+        """
+    )
+    if not coverage_info.get("uncovered", False):
+        blocker = coverage_info.get("blocker")
+        raise RuntimeError(f'Export button "{button_label}" is blocked by: {blocker}')
+
+
+def _download_from_export_dialog(
+    page: Page,
+    button_label: str,
+    continue_text: str = "המשך",
+    timeout_ms: int = 60000,
+) -> Path:
+    _ensure_clickable(page, button_label=button_label, timeout_ms=15000)
+    export_button = page.get_by_title(button_label, exact=True).first
+    continue_button = page.get_by_text(continue_text, exact=True).first
+    with page.expect_download(timeout=timeout_ms) as download_info:
+        export_button.click(timeout=15000)
+        continue_button.wait_for(state="visible", timeout=15000)
+        continue_button.click(timeout=15000)
+    download = download_info.value
+    return Path(download.path())
 
 
 def _debug_enabled() -> bool:
@@ -93,10 +161,8 @@ def _export_transactions_for_month(
     # This path is where we want the final CSV/Excel to live.
     target = paths.leumi_exports_dir / f"leumi_transactions_{year}_{month}.xls"
 
-    # current_year = datetime.now().year
-    # last_month = datetime.now().month - 1 if datetime.now().month > 1 else 12
-    # last_month_in_hebrew, last_next_month_in_hebrew = month_number_to_hebrew(last_month)
-    # month_in_hebrew, next_month_in_hebrew = month_number_to_hebrew(month)
+    month_in_hebrew, _ = month_number_to_hebrew(month)
+    _, next_current_month_in_hebrew = month_number_to_hebrew(datetime.now().month)
 
     start_day = "10"
     end_day = "9"
@@ -111,54 +177,39 @@ def _export_transactions_for_month(
         next_year_int = year_int + 1
     else:
         next_year_int = year_int
-    with page.expect_download() as download_info:
-        # Go to the checking account ("עובר ושב")
-        page.locator(
-            "app-footer a[aria-label='עובר ושב'][href*='BusinessAccountTrx']"
-        ).click()
+    # Go to the checking account ("עובר ושב")
+    page.locator("app-footer a[aria-label='עובר ושב'][href*='BusinessAccountTrx']").click()
 
-        # Open advanced search
-        page.get_by_text("חיפוש מתקדם", exact=True).click()
+    # Open advanced search
+    page.get_by_text("חיפוש מתקדם", exact=True).click()
 
-        # Set date range – these are your recorded clicks; customize as needed
-        page.get_by_text("תקופה").click()
-        # page.locator(".ts-btn.btn-default").first.click()
-        page.get_by_placeholder("מתאריך").click()
-        page.get_by_placeholder("מתאריך").press("ControlOrMeta+a")
-        page.get_by_placeholder("מתאריך").fill(f"{start_day}.{month_int}.{year_int}")
-        page.get_by_placeholder("מתאריך").click()
-        page.wait_for_timeout(1000)
-        page.get_by_placeholder("עד תאריך").click()
-        page.get_by_placeholder("עד תאריך").press("ControlOrMeta+a")
-        page.get_by_placeholder("עד תאריך").fill(
-            f"{end_day}.{next_month_int}.{next_year_int}"
-        )
-        page.get_by_placeholder("עד תאריך").click()
+    # Set date range – these are your recorded clicks; customize as needed
+    page.get_by_text("תקופה").click()
+    # page.locator(".ts-btn.btn-default").first.click()
+    page.get_by_placeholder("מתאריך").click()
+    page.get_by_placeholder("מתאריך").press("ControlOrMeta+a")
+    page.get_by_placeholder("מתאריך").fill(f"{start_day}.{month_int}.{year_int}")
+    page.get_by_placeholder("מתאריך").click()
+    page.wait_for_timeout(1000)
+    page.get_by_placeholder("עד תאריך").click()
+    page.get_by_placeholder("עד תאריך").press("ControlOrMeta+a")
+    page.get_by_placeholder("עד תאריך").fill(f"{end_day}.{next_month_int}.{next_year_int}")
+    page.get_by_placeholder("עד תאריך").click()
 
-        # Apply filter
-        page.wait_for_timeout(1000)
-        page.get_by_label("סנן").click()
+    # Apply filter
+    page.wait_for_timeout(1000)
+    page.get_by_label("סנן").click()
 
-        # Export to Excel and confirm
-        page.wait_for_timeout(5000)
-        page.get_by_title("יצוא לאקסל").click()
-        page.get_by_text("המשך").click()
-
-    download = download_info.value
-    temp_path = Path(download.path())
+    # Export to Excel and confirm
+    page.wait_for_timeout(5000)
+    temp_path = _download_from_export_dialog(page, button_label="יצוא לאקסל")
     temp_path.replace(target)
 
-    with page.expect_download() as download1_info:
-        page.locator("app-nav-menu").get_by_text("דף הבית").click()
-        page.locator("#center_hpsummary").get_by_label(
-            "כרטיסי אשראי", exact=True
-        ).click()
-        page.locator("button").filter(has_text="אפריל").click()
-        page.locator("li").filter(has_text="מרץ").click()
-        page.get_by_title("יצוא לאקסל", exact=True).click()
-        page.get_by_text("המשך").click()
-    download1 = download1_info.value
-    temp_path1 = Path(download1.path())
+    page.locator("app-nav-menu").get_by_text("דף הבית").click()
+    page.locator("#center_hpsummary").get_by_label("כרטיסי אשראי", exact=True).click()
+    page.locator("button").filter(has_text=next_current_month_in_hebrew).click()
+    page.locator("li").filter(has_text=month_in_hebrew).click()
+    temp_path1 = _download_from_export_dialog(page, button_label="יצוא לאקסל")
     cards_target = paths.leumi_exports_dir / f"leumi_credit_cards_{year}_{month}.xls"
     temp_path1.replace(cards_target)
 
@@ -204,6 +255,8 @@ def getLeumiData(year: str, month: str) -> Optional[Tuple[Path, Path]]:
         debug_dir = paths.data_dir / "leumi_debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
         trace_path = debug_dir / f"trace_leumi_{year}_{month}.zip"
+        error_screenshot_path = debug_dir / f"error_{year}_{month}.png"
+        error_html_path = debug_dir / f"error_{year}_{month}.html"
 
         browser = p.chromium.launch(headless=(not debug))
         context: BrowserContext = browser.new_context(
@@ -215,30 +268,56 @@ def getLeumiData(year: str, month: str) -> Optional[Tuple[Path, Path]]:
             context.tracing.start(screenshots=True, snapshots=True, sources=True)
         page = context.new_page()
 
-        _login_leumi(page)
-        page.wait_for_timeout(3000)
+        try:
+            _login_leumi(page)
+            page.wait_for_timeout(3000)
 
-        # Scrape balance from the summary view
-        balance_text = _scrape_balance(page)
-        if balance_text:
-            update_state(
-                {
-                    "leumi_balance": balance_text,
-                }
-            )
+            # Scrape balance from the summary view
+            balance_text = _scrape_balance(page)
+            if balance_text:
+                update_state(
+                    {
+                        "leumi_balance": balance_text,
+                    }
+                )
 
-        # Export transactions (will raise NotImplementedError until implemented)
-        exported_path = _export_transactions_for_month(page, year, month)
-        if exported_path is None:
-            raise RuntimeError("Failed to export transactions")
+            # Export transactions (will raise NotImplementedError until implemented)
+            exported_path = _export_transactions_for_month(page, year, month)
+            if exported_path is None:
+                raise RuntimeError("Failed to export transactions")
 
-        if debug:
-            page.screenshot(
-                path=str(debug_dir / f"final_{year}_{month}.png"), full_page=True
-            )
-            context.tracing.stop(path=str(trace_path))
+            if debug:
+                page.screenshot(
+                    path=str(debug_dir / f"final_{year}_{month}.png"), full_page=True
+                )
+        except Exception as e:
+            print("[leumi][error] Leumi flow failed.")
+            print(f"[leumi][error] {type(e).__name__}: {e}")
+            print(traceback.format_exc())
 
-        context.close()
-        browser.close()
+            # Best-effort debug artifacts for troubleshooting.
+            try:
+                page.screenshot(path=str(error_screenshot_path), full_page=True)
+                print(f"[leumi][debug] Saved error screenshot: {error_screenshot_path}")
+            except Exception as capture_error:
+                print(f"[leumi][debug] Failed to save error screenshot: {capture_error}")
+
+            try:
+                error_html_path.write_text(page.content(), encoding="utf-8")
+                print(f"[leumi][debug] Saved error HTML: {error_html_path}")
+            except Exception as capture_error:
+                print(f"[leumi][debug] Failed to save error HTML: {capture_error}")
+
+            raise
+        finally:
+            if debug:
+                try:
+                    context.tracing.stop(path=str(trace_path))
+                    print(f"[leumi][debug] Saved Playwright trace: {trace_path}")
+                except Exception as trace_error:
+                    print(f"[leumi][debug] Failed to save Playwright trace: {trace_error}")
+
+            context.close()
+            browser.close()
 
     return exported_path[0], exported_path[1]

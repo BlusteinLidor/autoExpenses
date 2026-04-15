@@ -12,6 +12,14 @@ _CARD_STATEMENT_DUPLICATE_PATTERNS = [
     "ל.מאסטרקרד(יש)",
 ]
 
+_DEFAULT_INCOME_FALLBACK_CATEGORY = "הכנסה אחרת / חד פעמית"
+# Explicit income-source overrides: when an expense name matches one of these
+# patterns, force it into the matching income category (rows 6..12 in template).
+_INCOME_NAME_CATEGORY_OVERRIDES = {
+    "עירית מגדל ה~י": "שכר עבודה אלה - נטו",
+    "נאנומושן בע\"~י": "שכר עבודה לידור - נטו",
+}
+
 
 def _normalize_for_fuzzy_name(s: str) -> str:
     return re.sub(r"[^א-תa-zA-Z0-9]", "", str(s or "").lower())
@@ -30,6 +38,18 @@ def is_card_statement_duplicate_expense(expense_name: str, threshold: float = 0.
         if score >= threshold:
             return True
     return False
+
+
+def _normalize_income_name_key(s: str) -> str:
+    """
+    Normalize source names for income override matching.
+    Handles model quirks such as replacing '-' with '~'.
+    """
+    normalized = str(s or "").strip().lower()
+    normalized = normalized.replace("-", "~")
+    normalized = normalized.replace("״", '"').replace("׳", "'")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
 
 
 def _safe_float_from_string(s: str, context: str = ""):
@@ -346,6 +366,10 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
     user_corrections_norm = {
         _normalize_expense_name_for_corrections(k): v for k, v in (user_corrections or {}).items()
     }
+    income_overrides_norm = {
+        _normalize_income_name_key(k): v
+        for k, v in _INCOME_NAME_CATEGORY_OVERRIDES.items()
+    }
 
     # split OpenAI's output to separate lines
     eachLineList = [line.strip() for line in openAIOutput.split("\n") if line.strip()]
@@ -392,6 +416,18 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
                 print(f"[fillCells] Line {line_no}: cost parse issue: {parse_err}")
                 errorString += f"Invalid cost value: {val}\n"
                 continue
+        # Income-source hard override (before regular category logic).
+        normalized_income_key = _normalize_income_name_key(name)
+        forced_income_category = income_overrides_norm.get(normalized_income_key)
+        if forced_income_category:
+            if forced_income_category not in allowed_categories:
+                forced_income_category = (
+                    _DEFAULT_INCOME_FALLBACK_CATEGORY
+                    if _DEFAULT_INCOME_FALLBACK_CATEGORY in allowed_categories
+                    else _best_category_match(_DEFAULT_INCOME_FALLBACK_CATEGORY)
+                )
+            category = forced_income_category
+
         # If user specified a correction for this expense, use it; otherwise use AI category
         normalized_name_key = _normalize_expense_name_for_corrections(name)
         if normalized_name_key in user_corrections_norm:

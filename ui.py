@@ -23,14 +23,19 @@ def runPipelineThreaded():
 
 def runPipeline():
     include_leumi = bool(includeLeumiVar.get())
-    loading(
-        "Loading... Running pipeline (download + categorize). Please wait..."
-    )
+    loading("Loading... Running pipeline (download + categorize). Please wait...")
     try:
         year = yearComboBox.get()
         month = monthComboBox.get()
+
+        def _progress(step_text: str):
+            loading(step_text)
+
         _, output_path, ai_output = prepare_for_month(
-            year=year, month=month, include_leumi=include_leumi
+            year=year,
+            month=month,
+            include_leumi=include_leumi,
+            progress_callback=_progress,
         )
         show_corrections_dialog(
             year=year,
@@ -139,10 +144,9 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
     SPLITTABLE_EXPENSE_NAME = "העברה דיגיטל"
 
     def _normalize_ws(s: str) -> str:
-        return (
-            re.sub(r"\s+", " ", str(s or "").replace("\u200f", "").replace("\u200e", ""))
-            .strip()
-        )
+        return re.sub(
+            r"\s+", " ", str(s or "").replace("\u200f", "").replace("\u200e", "")
+        ).strip()
 
     def _is_split_expense(name: str) -> bool:
         return _normalize_ws(name) == SPLITTABLE_EXPENSE_NAME
@@ -208,9 +212,9 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                 "cat_vars": part_cat_vars,
             }
         else:
-            Label(scrollable, text=item["name"], anchor="w", justify=LEFT, wraplength=420).grid(
-                row=i, column=0, sticky=W, padx=6, pady=3
-            )
+            Label(
+                scrollable, text=item["name"], anchor="w", justify=LEFT, wraplength=420
+            ).grid(row=i, column=0, sticky=W, padx=6, pady=3)
             Label(scrollable, text=str(item["cost"])).grid(
                 row=i, column=1, sticky=W, padx=6, pady=3
             )
@@ -285,6 +289,7 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
     def apply_and_fill():
         reviewed_items = []
         excluded_regular = 0
+
         def _parse_cost_entry(s: str) -> float:
             try:
                 return abs(float(str(s or "").strip()))
@@ -300,9 +305,19 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
 
                     any_added = False
                     for part_no in (1, 2, 3):
-                        cv = cost_vars[part_no - 1] if part_no - 1 < len(cost_vars) else None
-                        catv = cat_vars[part_no - 1] if part_no - 1 < len(cat_vars) else None
-                        part_cost = _parse_cost_entry(cv.get() if cv is not None else "0")
+                        cv = (
+                            cost_vars[part_no - 1]
+                            if part_no - 1 < len(cost_vars)
+                            else None
+                        )
+                        catv = (
+                            cat_vars[part_no - 1]
+                            if part_no - 1 < len(cat_vars)
+                            else None
+                        )
+                        part_cost = _parse_cost_entry(
+                            cv.get() if cv is not None else "0"
+                        )
                         part_cat = str(catv.get() if catv is not None else "").strip()
                         if not part_cat and allowed_categories:
                             part_cat = allowed_categories[0]
@@ -354,6 +369,7 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                 month=month,
                 output_workbook_path=output_path,
                 categorized_output=reviewed_output,
+                progress_callback=loading,
             )
             dialog.destroy()
             messagebox.showinfo(
@@ -387,7 +403,7 @@ def open_category_corrections_file():
         p.write_text("{\n}\n", encoding="utf-8")
         messagebox.showinfo(
             "Category corrections",
-            "Created empty file. Add lines like:\n\"שם הוצאה\": \"תת-קטגוריה מדויקת\"\n\nUse exact category names from your template (column B).",
+            'Created empty file. Add lines like:\n"שם הוצאה": "תת-קטגוריה מדויקת"\n\nUse exact category names from your template (column B).',
         )
     try:
         if os.name == "nt":
@@ -395,7 +411,9 @@ def open_category_corrections_file():
         else:
             subprocess.run(["xdg-open", str(p)], check=False)
     except Exception as e:
-        messagebox.showerror("Error", f"Could not open file:\n{e}\n\nOpen manually: {p}")
+        messagebox.showerror(
+            "Error", f"Could not open file:\n{e}\n\nOpen manually: {p}"
+        )
 
 
 ##################### UI ###################
@@ -415,7 +433,9 @@ settingsMenu.add_checkbutton(
     command=lambda: toggleHeadless(headlessCheckbuttonState.get()),
     variable=headlessCheckbuttonState,
 )
-settingsMenu.add_command(label="Edit category corrections...", command=open_category_corrections_file)
+settingsMenu.add_command(
+    label="Edit category corrections...", command=open_category_corrections_file
+)
 menuBar.add_cascade(label="Settings", menu=settingsMenu)
 window.config(menu=menuBar)
 
