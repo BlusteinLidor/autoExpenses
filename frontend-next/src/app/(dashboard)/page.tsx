@@ -7,6 +7,8 @@ import { ProgressPanel } from "@/components/run/ProgressPanel";
 import { RunForm } from "@/components/run/RunForm";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   finalizeRun,
   getAssets,
@@ -38,25 +40,26 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const stateQuery = useQuery({ queryKey: ["state"], queryFn: getState });
   const assetsQuery = useQuery({ queryKey: ["assets"], queryFn: getAssets });
-  const [year, setYear] = useState(String(new Date().getFullYear()));
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
-  const [includeLeumi, setIncludeLeumi] = useState(true);
+  const [runYear, setRunYear] = useState(String(new Date().getFullYear()));
+  const [runMonth, setRunMonth] = useState(new Date().getMonth() + 1);
+  const [breakdownYear, setBreakdownYear] = useState(String(new Date().getFullYear()));
+  const [breakdownMonth, setBreakdownMonth] = useState(new Date().getMonth() + 1);
   const [runToken, setRunToken] = useState("");
   const [status, setStatus] = useState("Ready");
   const [review, setReview] = useState<PrepareRunResponse | null>(null);
   const [error, setError] = useState("");
 
   const summaryQuery = useQuery({
-    queryKey: ["summary", year, month],
-    queryFn: () => getExpensesSummary(year, month),
+    queryKey: ["summary", breakdownYear, breakdownMonth],
+    queryFn: () => getExpensesSummary(breakdownYear, breakdownMonth),
   });
   const incomeSummaryQuery = useQuery({
-    queryKey: ["income-summary", year, month],
-    queryFn: () => getIncomeSummary(year, month),
+    queryKey: ["income-summary", breakdownYear, breakdownMonth],
+    queryFn: () => getIncomeSummary(breakdownYear, breakdownMonth),
   });
   const investmentsSummaryQuery = useQuery({
-    queryKey: ["investments-summary", year, month],
-    queryFn: () => getInvestmentsSummary(year, month),
+    queryKey: ["investments-summary", breakdownYear, breakdownMonth],
+    queryFn: () => getInvestmentsSummary(breakdownYear, breakdownMonth),
   });
 
   const progressQuery = useQuery({
@@ -86,9 +89,9 @@ export default function DashboardPage() {
       setError("");
       void queryClient.invalidateQueries({ queryKey: ["state"] });
       void queryClient.invalidateQueries({ queryKey: ["assets"] });
-      void queryClient.invalidateQueries({ queryKey: ["summary", year, month] });
-      void queryClient.invalidateQueries({ queryKey: ["income-summary", year, month] });
-      void queryClient.invalidateQueries({ queryKey: ["investments-summary", year, month] });
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["income-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["investments-summary"] });
     },
     onError: (mutationError) => {
       setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
@@ -136,23 +139,21 @@ export default function DashboardPage() {
 
       <section className="grid gap-4 lg:grid-cols-2">
         <RunForm
-          year={year}
-          month={month}
+          year={runYear}
+          month={runMonth}
           years={selectableYears}
-          includeLeumi={includeLeumi}
           busy={prepareMutation.isPending || finalizeMutation.isPending}
-          onYearChange={setYear}
-          onMonthChange={setMonth}
-          onIncludeLeumiChange={setIncludeLeumi}
+          onYearChange={setRunYear}
+          onMonthChange={setRunMonth}
           onRun={() => {
             const token = generateRunToken();
             setRunToken(token);
-            setStatus(`Running ${monthName(month)} ${year}...`);
+            setStatus(`Running ${monthName(runMonth)} ${runYear}...`);
             setReview(null);
             prepareMutation.mutate({
-              year,
-              month,
-              include_leumi: includeLeumi,
+              year: runYear,
+              month: runMonth,
+              include_leumi: true,
               run_token: token,
             });
           }}
@@ -183,6 +184,47 @@ export default function DashboardPage() {
         />
       ) : null}
 
+      <section className="rounded-lg border border-border/70 bg-card/40 p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-2">
+            <Label>Breakdown Year</Label>
+            <Select value={breakdownYear} onValueChange={(value) => setBreakdownYear(value ?? breakdownYear)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectableYears.map((itemYear) => (
+                  <SelectItem key={itemYear} value={itemYear}>
+                    {itemYear}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Breakdown Month</Label>
+            <Select
+              value={String(breakdownMonth)}
+              onValueChange={(value) => setBreakdownMonth(Number(value ?? breakdownMonth))}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Month" />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 12 }).map((_, idx) => (
+                  <SelectItem key={idx + 1} value={String(idx + 1)}>
+                    {monthName(idx + 1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="pb-2 text-sm text-muted-foreground">
+            Showing breakdown for {monthName(breakdownMonth)} {breakdownYear}
+          </p>
+        </div>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-4">
         <AssetsPanel
           cars={assetsQuery.data?.cars ?? []}
@@ -194,20 +236,17 @@ export default function DashboardPage() {
         />
         <SpendingChart
           summary={summaryQuery.data ?? {}}
-          selectedMonthLabel={`${monthName(month)} ${year}`}
           title="Spending Breakdown"
           totalLabel="Total Spendings"
         />
         <SpendingChart
           summary={incomeSummaryQuery.data ?? {}}
-          selectedMonthLabel={`${monthName(month)} ${year}`}
           title="Income Breakdown"
           description="Income categories for selected month."
           totalLabel="Total Income"
         />
         <SpendingChart
           summary={investmentsSummaryQuery.data ?? {}}
-          selectedMonthLabel={`${monthName(month)} ${year}`}
           title="Investment Breakdown"
           description="Investment categories for selected month."
           totalLabel="Total Investments"

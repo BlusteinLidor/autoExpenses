@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -10,11 +9,9 @@ type RunFormProps = {
   year: string;
   month: number;
   years: string[];
-  includeLeumi: boolean;
   busy: boolean;
   onYearChange: (year: string) => void;
   onMonthChange: (month: number) => void;
-  onIncludeLeumiChange: (checked: boolean) => void;
   onRun: () => void;
 };
 
@@ -23,11 +20,9 @@ export function RunForm(props: RunFormProps) {
     year,
     month,
     years,
-    includeLeumi,
     busy,
     onYearChange,
     onMonthChange,
-    onIncludeLeumiChange,
     onRun,
   } = props;
 
@@ -40,7 +35,7 @@ export function RunForm(props: RunFormProps) {
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label>Year</Label>
+            <Label>Run Year</Label>
             <Select value={year} onValueChange={(value) => onYearChange(value ?? year)}>
               <SelectTrigger>
                 <SelectValue placeholder="Year" />
@@ -55,7 +50,7 @@ export function RunForm(props: RunFormProps) {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Month</Label>
+            <Label>Run Month</Label>
             <Select value={String(month)} onValueChange={(value) => onMonthChange(Number(value ?? month))}>
               <SelectTrigger>
                 <SelectValue placeholder="Month" />
@@ -69,15 +64,6 @@ export function RunForm(props: RunFormProps) {
               </SelectContent>
             </Select>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="includeLeumi"
-            checked={includeLeumi}
-            onCheckedChange={(checked) => onIncludeLeumiChange(Boolean(checked))}
-          />
-          <Label htmlFor="includeLeumi">Include Leumi transactions</Label>
         </div>
 
         <Button className="w-full" onClick={onRun} disabled={busy}>

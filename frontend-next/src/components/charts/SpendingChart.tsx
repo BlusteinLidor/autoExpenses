@@ -9,7 +9,6 @@ const CHART_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#f
 
 type SpendingChartProps = {
   summary: ExpensesSummary;
-  selectedMonthLabel: string;
   title?: string;
   description?: string;
   totalLabel?: string;
@@ -17,7 +16,6 @@ type SpendingChartProps = {
 
 export function SpendingChart({
   summary,
-  selectedMonthLabel,
   title = "Spending Breakdown",
   description = "Top categories for selected month.",
   totalLabel = "Total Spendings",
@@ -38,7 +36,6 @@ export function SpendingChart({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm font-medium text-muted-foreground">{selectedMonthLabel}</p>
         {data.length === 0 ? (
           <p className="text-sm text-muted-foreground">No summary available yet for this month.</p>
         ) : (

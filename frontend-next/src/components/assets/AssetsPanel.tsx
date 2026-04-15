@@ -81,7 +81,7 @@ export function AssetsPanel({ cars, investments, leumiBalance, onChange }: Asset
       <CardContent className="space-y-5">
         <div className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-md border p-3">
-            <p className="text-muted-foreground">Leumi Balance</p>
+            <p className="text-muted-foreground">Bank Balance</p>
             <p className="text-xl font-semibold">{money(leumiBalance)}</p>
           </div>
           <div className="rounded-md border p-3">
