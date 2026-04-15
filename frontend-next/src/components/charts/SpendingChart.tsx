@@ -3,6 +3,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ExpensesSummary } from "@/lib/api/types";
 import { money, safeNumber } from "@/lib/format";
+import { useCallback, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 const CHART_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#f97316", "#f43f5e", "#84cc16", "#14b8a6"];
@@ -13,6 +14,30 @@ type SpendingChartProps = {
   description?: string;
   totalLabel?: string;
 };
+
+function TruncatedCategoryLabel({ text }: { text: string }) {
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  const updateTruncation = useCallback(() => {
+    if (!labelRef.current) {
+      return;
+    }
+    setIsTruncated(labelRef.current.scrollWidth > labelRef.current.clientWidth);
+  }, []);
+
+  return (
+    <span
+      ref={labelRef}
+      className="truncate"
+      title={isTruncated ? text : undefined}
+      onMouseEnter={updateTruncation}
+      onFocus={updateTruncation}
+    >
+      {text}
+    </span>
+  );
+}
 
 export function SpendingChart({
   summary,
@@ -63,7 +88,7 @@ export function SpendingChart({
                         className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
                       />
-                      <span className="truncate">{item.name}</span>
+                      <TruncatedCategoryLabel text={item.name} />
                     </div>
                     <span className="shrink-0 text-muted-foreground">{money(item.value)} ({percent.toFixed(1)}%)</span>
                   </div>
