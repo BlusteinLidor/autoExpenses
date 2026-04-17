@@ -18,12 +18,18 @@ def _month_column_letter(month: str | int) -> str:
 def _monthly_output_path(year: str, month: str | int) -> Path:
     paths = get_paths()
     month_padded = str(month).zfill(2)
+    year_dir = paths.data_dir / str(year)
+    yearly_path = year_dir / f"expenses_output_{year}_{month_padded}.xlsx"
+    if yearly_path.exists():
+        return yearly_path
     return paths.data_dir / f"expenses_output_{year}_{month_padded}.xlsx"
 
 
 def _yearly_total_path(year: str) -> Path:
     paths = get_paths()
-    return paths.data_dir / f"expenses_output_{year}_total.xlsx"
+    year_dir = paths.data_dir / str(year)
+    year_dir.mkdir(parents=True, exist_ok=True)
+    return year_dir / f"expenses_output_{year}_total.xlsx"
 
 
 def ensure_yearly_total_workbook(year: str) -> Path:

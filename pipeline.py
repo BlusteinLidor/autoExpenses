@@ -36,6 +36,8 @@ def prepare_for_month(
 
     paths = get_paths()
     month_padded = str(month).zfill(2)
+    year_dir = paths.data_dir / str(year)
+    year_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Download from Max; function already appends foreign exchange rows.
     try:
@@ -52,7 +54,7 @@ def prepare_for_month(
             )
             print("[pipeline] Step 2: Download Leumi + merge")
             leumi_trans_path, leumi_cards_path = getLeumiData(year, month)
-            combined_path = paths.data_dir / f"combined_expenses_{year}_{month}.xlsx"
+            combined_path = year_dir / f"combined_expenses_{year}_{month}.xlsx"
             merge_max_and_leumi(
                 source_excel_path,
                 Path(leumi_trans_path),
@@ -77,7 +79,7 @@ def prepare_for_month(
     # 4. Ensure we have a current output workbook to write into
     _emit_progress(progress_callback, "Step 4/5: Preparing output workbook...")
     print("[pipeline] Step 4: Prepare output workbook")
-    output_workbook_path = paths.data_dir / f"expenses_output_{year}_{month_padded}.xlsx"
+    output_workbook_path = year_dir / f"expenses_output_{year}_{month_padded}.xlsx"
     if not output_workbook_path.exists():
         if not paths.template_expenses.exists():
             raise FileNotFoundError(

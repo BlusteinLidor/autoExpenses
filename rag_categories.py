@@ -53,7 +53,7 @@ def _get_history_workbooks() -> List[Tuple[str, float]]:
     """
     paths = get_paths()
     candidates = sorted(
-        paths.data_dir.glob("expenses_output_*.xlsx"),
+        paths.data_dir.glob("**/expenses_output_*.xlsx"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

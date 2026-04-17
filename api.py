@@ -397,13 +397,19 @@ def _summarize_sheet_row_ranges(
     paths = get_paths()
 
     month_padded = str(month).zfill(2)
-    # pipeline writes per-month workbooks like: expenses_output_{year}_{MM}.xlsx
-    candidate_path = paths.data_dir / f"expenses_output_{year}_{month_padded}.xlsx"
+    # pipeline writes per-month workbooks like: data/{year}/expenses_output_{year}_{MM}.xlsx
+    candidate_path = (
+        paths.data_dir / str(year) / f"expenses_output_{year}_{month_padded}.xlsx"
+    )
     if not candidate_path.exists():
-        # Fallback for older flows / manual runs.
-        candidate_path = (
-            paths.current_expenses if paths.current_expenses.exists() else None
-        )
+        # Fallbacks for older flows / manual runs.
+        flat_data_path = paths.data_dir / f"expenses_output_{year}_{month_padded}.xlsx"
+        if flat_data_path.exists():
+            candidate_path = flat_data_path
+        else:
+            candidate_path = (
+                paths.current_expenses if paths.current_expenses.exists() else None
+            )
     if not candidate_path:
         return {}
 
@@ -478,7 +484,7 @@ def _available_output_months(data_dir: Path) -> list[tuple[int, int]]:
     Pattern: expenses_output_YYYY_MM.xlsx
     """
     months: set[tuple[int, int]] = set()
-    for file_path in data_dir.glob("expenses_output_????_??.xlsx"):
+    for file_path in data_dir.glob("**/expenses_output_????_??.xlsx"):
         stem_parts = file_path.stem.split("_")
         if len(stem_parts) < 4:
             continue
