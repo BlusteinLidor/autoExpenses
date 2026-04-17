@@ -57,7 +57,7 @@ export type TotalsTimelinePoint = {
 };
 
 export type TotalsTimelineResponse = {
-  mode: "year" | "trailing";
+  mode: "year" | "trailing" | "range";
   points: TotalsTimelinePoint[];
 };
 

@@ -72,13 +72,35 @@ export function getInvestmentsSummary(year: string, month: number) {
   );
 }
 
-export function getTotalsTimeline(mode: "year" | "trailing", year?: string, trailingMonths?: number) {
+export function getTotalsTimeline(
+  mode: "year" | "trailing" | "range",
+  options?: {
+    year?: string;
+    trailingMonths?: number;
+    startYear?: string;
+    startMonth?: number;
+    endYear?: string;
+    endMonth?: number;
+  },
+) {
   const params = new URLSearchParams({ mode });
-  if (year) {
-    params.set("year", year);
+  if (options?.year) {
+    params.set("year", options.year);
   }
-  if (typeof trailingMonths === "number") {
-    params.set("trailing_months", String(trailingMonths));
+  if (typeof options?.trailingMonths === "number") {
+    params.set("trailing_months", String(options.trailingMonths));
+  }
+  if (options?.startYear) {
+    params.set("start_year", options.startYear);
+  }
+  if (typeof options?.startMonth === "number") {
+    params.set("start_month", String(options.startMonth));
+  }
+  if (options?.endYear) {
+    params.set("end_year", options.endYear);
+  }
+  if (typeof options?.endMonth === "number") {
+    params.set("end_month", String(options.endMonth));
   }
   return apiFetch<TotalsTimelineResponse>(`/totals/timeline?${params.toString()}`);
 }

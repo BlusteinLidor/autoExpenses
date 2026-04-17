@@ -37,16 +37,26 @@ function nextMonthFromState(state: Awaited<ReturnType<typeof getState>> | undefi
   return { year: String(nextDate.getFullYear()), month: nextDate.getMonth() + 1 };
 }
 
+function toTimelineComparable(year: string, month: number) {
+  return Number(year) * 100 + month;
+}
+
 export default function DashboardPage() {
+  const now = new Date();
   const queryClient = useQueryClient();
   const stateQuery = useQuery({ queryKey: ["state"], queryFn: getState });
   const assetsQuery = useQuery({ queryKey: ["assets"], queryFn: getAssets });
-  const [runYear, setRunYear] = useState(String(new Date().getFullYear()));
-  const [runMonth, setRunMonth] = useState(new Date().getMonth() + 1);
-  const [breakdownYear, setBreakdownYear] = useState(String(new Date().getFullYear()));
-  const [breakdownMonth, setBreakdownMonth] = useState(new Date().getMonth() + 1);
-  const [timelineMode, setTimelineMode] = useState<"year" | "trailing">("year");
+  const [runYear, setRunYear] = useState(String(now.getFullYear()));
+  const [runMonth, setRunMonth] = useState(now.getMonth() + 1);
+  const [breakdownYear, setBreakdownYear] = useState(String(now.getFullYear()));
+  const [breakdownMonth, setBreakdownMonth] = useState(now.getMonth() + 1);
+  const [timelineYear, setTimelineYear] = useState(String(now.getFullYear()));
+  const [timelineMode, setTimelineMode] = useState<"year" | "trailing" | "range">("year");
   const [timelineTrailingMonths, setTimelineTrailingMonths] = useState(12);
+  const [timelineStartYear, setTimelineStartYear] = useState(String(now.getFullYear()));
+  const [timelineStartMonth, setTimelineStartMonth] = useState(1);
+  const [timelineEndYear, setTimelineEndYear] = useState(String(now.getFullYear()));
+  const [timelineEndMonth, setTimelineEndMonth] = useState(now.getMonth() + 1);
   const [runToken, setRunToken] = useState("");
   const [status, setStatus] = useState("Ready");
   const [review, setReview] = useState<PrepareRunResponse | null>(null);
@@ -65,13 +75,25 @@ export default function DashboardPage() {
     queryFn: () => getInvestmentsSummary(breakdownYear, breakdownMonth),
   });
   const timelineQuery = useQuery({
-    queryKey: ["totals-timeline", timelineMode, breakdownYear, timelineTrailingMonths],
+    queryKey: [
+      "totals-timeline",
+      timelineMode,
+      timelineYear,
+      timelineTrailingMonths,
+      timelineStartYear,
+      timelineStartMonth,
+      timelineEndYear,
+      timelineEndMonth,
+    ],
     queryFn: () =>
-      getTotalsTimeline(
-        timelineMode,
-        timelineMode === "year" ? breakdownYear : undefined,
-        timelineMode === "trailing" ? timelineTrailingMonths : undefined,
-      ),
+      getTotalsTimeline(timelineMode, {
+        year: timelineMode === "year" ? timelineYear : undefined,
+        trailingMonths: timelineMode === "trailing" ? timelineTrailingMonths : undefined,
+        startYear: timelineMode === "range" ? normalizedTimelineRange.start.year : undefined,
+        startMonth: timelineMode === "range" ? normalizedTimelineRange.start.month : undefined,
+        endYear: timelineMode === "range" ? normalizedTimelineRange.end.year : undefined,
+        endMonth: timelineMode === "range" ? normalizedTimelineRange.end.month : undefined,
+      }),
   });
 
   const progressQuery = useQuery({
@@ -128,6 +150,14 @@ export default function DashboardPage() {
     const years = new Set([String(nowYear), String(nowYear - 1), String(nowYear - 2), suggestion.year]);
     return [...years].sort((a, b) => Number(a) - Number(b));
   }, [suggestion.year]);
+  const normalizedTimelineRange = useMemo(() => {
+    const start = { year: timelineStartYear, month: timelineStartMonth };
+    const end = { year: timelineEndYear, month: timelineEndMonth };
+    if (toTimelineComparable(start.year, start.month) <= toTimelineComparable(end.year, end.month)) {
+      return { start, end };
+    }
+    return { start: end, end: start };
+  }, [timelineStartYear, timelineStartMonth, timelineEndYear, timelineEndMonth]);
 
   const lastFilled = stateQuery.data?.last_filled_year && stateQuery.data?.last_filled_month
     ? `Last filled: ${monthName(Number(stateQuery.data.last_filled_month))} ${stateQuery.data.last_filled_year}`
@@ -251,27 +281,51 @@ export default function DashboardPage() {
           summary={summaryQuery.data ?? {}}
           title="Spending Breakdown"
           totalLabel="Total Spendings"
+          loading={summaryQuery.isLoading || summaryQuery.isFetching}
         />
         <SpendingChart
           summary={incomeSummaryQuery.data ?? {}}
           title="Income Breakdown"
           description="Income categories for selected month."
           totalLabel="Total Income"
+          loading={incomeSummaryQuery.isLoading || incomeSummaryQuery.isFetching}
         />
         <SpendingChart
           summary={investmentsSummaryQuery.data ?? {}}
           title="Investment Breakdown"
           description="Investment categories for selected month."
           totalLabel="Total Investments"
+          loading={investmentsSummaryQuery.isLoading || investmentsSummaryQuery.isFetching}
         />
       </section>
 
       <section className="rounded-lg border border-border/70 bg-card/40 p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-2">
+            <Label>Timeline Year</Label>
+            <Select value={timelineYear} onValueChange={(value) => setTimelineYear(value ?? timelineYear)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectableYears.map((itemYear) => (
+                  <SelectItem key={`timeline-${itemYear}`} value={itemYear}>
+                    {itemYear}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label>Timeline Range</Label>
             <Select
-              value={timelineMode === "year" ? "selected-year" : `trailing-${timelineTrailingMonths}`}
+              value={
+                timelineMode === "year"
+                  ? "selected-year"
+                  : timelineMode === "range"
+                    ? "custom-range"
+                    : `trailing-${timelineTrailingMonths}`
+              }
               onValueChange={(value) => {
                 if (!value) {
                   setTimelineMode("year");
@@ -279,6 +333,10 @@ export default function DashboardPage() {
                 }
                 if (value === "selected-year") {
                   setTimelineMode("year");
+                  return;
+                }
+                if (value === "custom-range") {
+                  setTimelineMode("range");
                   return;
                 }
                 const trailingMonths = Number(value.replace("trailing-", ""));
@@ -291,21 +349,95 @@ export default function DashboardPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="selected-year">Selected year (Jan-Dec)</SelectItem>
+                <SelectItem value="custom-range">Custom start/end month range</SelectItem>
                 <SelectItem value="trailing-12">Last 12 months</SelectItem>
                 <SelectItem value="trailing-24">Last 24 months</SelectItem>
                 <SelectItem value="trailing-36">Last 36 months</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {timelineMode === "range" ? (
+            <>
+              <div className="space-y-2">
+                <Label>Start</Label>
+                <div className="flex gap-2">
+                  <Select value={timelineStartYear} onValueChange={(value) => setTimelineStartYear(value ?? timelineStartYear)}>
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue placeholder="Year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectableYears.map((itemYear) => (
+                        <SelectItem key={`timeline-start-year-${itemYear}`} value={itemYear}>
+                          {itemYear}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(timelineStartMonth)}
+                    onValueChange={(value) => setTimelineStartMonth(Number(value ?? timelineStartMonth))}
+                  >
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue placeholder="Month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }).map((_, idx) => (
+                        <SelectItem key={`timeline-start-month-${idx + 1}`} value={String(idx + 1)}>
+                          {monthName(idx + 1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>End</Label>
+                <div className="flex gap-2">
+                  <Select value={timelineEndYear} onValueChange={(value) => setTimelineEndYear(value ?? timelineEndYear)}>
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue placeholder="Year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectableYears.map((itemYear) => (
+                        <SelectItem key={`timeline-end-year-${itemYear}`} value={itemYear}>
+                          {itemYear}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(timelineEndMonth)}
+                    onValueChange={(value) => setTimelineEndMonth(Number(value ?? timelineEndMonth))}
+                  >
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue placeholder="Month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }).map((_, idx) => (
+                        <SelectItem key={`timeline-end-month-${idx + 1}`} value={String(idx + 1)}>
+                          {monthName(idx + 1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          ) : null}
           <p className="pb-2 text-sm text-muted-foreground">
             {timelineMode === "year"
-              ? `Timeline for ${breakdownYear}`
-              : `Timeline for latest ${timelineTrailingMonths} months`}
+              ? `Timeline for ${timelineYear}`
+              : timelineMode === "range"
+                ? `Timeline from ${monthName(normalizedTimelineRange.start.month)} ${normalizedTimelineRange.start.year} to ${monthName(normalizedTimelineRange.end.month)} ${normalizedTimelineRange.end.year}`
+                : `Timeline for latest ${timelineTrailingMonths} months`}
           </p>
         </div>
       </section>
 
-      <TimelineChart points={timelineQuery.data?.points ?? []} />
+      <TimelineChart
+        points={timelineQuery.data?.points ?? []}
+        loading={timelineQuery.isLoading || timelineQuery.isFetching}
+      />
     </main>
   );
 }

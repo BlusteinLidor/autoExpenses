@@ -341,12 +341,17 @@ def totals_timeline(
     mode: str = "year",
     year: int | None = None,
     trailing_months: int = 12,
+    start_year: int | None = None,
+    start_month: int | None = None,
+    end_year: int | None = None,
+    end_month: int | None = None,
 ) -> Dict[str, Any]:
     """
     Build a timeline of month totals for spending/income/investments.
     mode:
       - "year": use all 12 months from selected year.
       - "trailing": use latest N available output months.
+      - "range": use inclusive start/end year-month.
     """
     paths = get_paths()
     available_months = _available_output_months(paths.data_dir)
@@ -379,10 +384,44 @@ def totals_timeline(
                     **totals,
                 }
             )
+    elif mode == "range":
+        if None in (start_year, start_month, end_year, end_month):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    'Range mode requires "start_year", "start_month", '
+                    '"end_year", and "end_month".'
+                ),
+            )
+        if not (1 <= int(start_month) <= 12 and 1 <= int(end_month) <= 12):
+            raise HTTPException(
+                status_code=400,
+                detail="Range mode month values must be between 1 and 12.",
+            )
+
+        start = (int(start_year), int(start_month))
+        end = (int(end_year), int(end_month))
+        if start > end:
+            raise HTTPException(
+                status_code=400,
+                detail="Range mode start must be earlier than or equal to end.",
+            )
+
+        selected = _month_span(start=start, end=end)
+        for month_year, month in selected:
+            totals = _monthly_totals(month_year, month)
+            points.append(
+                {
+                    "year": month_year,
+                    "month": month,
+                    "label": f"{month_year}-{str(month).zfill(2)}",
+                    **totals,
+                }
+            )
     else:
         raise HTTPException(
             status_code=400,
-            detail='Invalid mode. Please use "year" or "trailing".',
+            detail='Invalid mode. Please use "year", "trailing", or "range".',
         )
 
     return {"mode": mode, "points": points}
@@ -496,6 +535,19 @@ def _available_output_months(data_dir: Path) -> list[tuple[int, int]]:
         if 1 <= month <= 12:
             months.add((year, month))
     return sorted(months)
+
+
+def _month_span(*, start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
+    """Return inclusive (year, month) points between start and end."""
+    months: list[tuple[int, int]] = []
+    year, month = start
+    while (year, month) <= end:
+        months.append((year, month))
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return months
 
 
 @app.get("/{asset_path:path}")

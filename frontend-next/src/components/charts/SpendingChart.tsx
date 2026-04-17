@@ -13,6 +13,7 @@ type SpendingChartProps = {
   title?: string;
   description?: string;
   totalLabel?: string;
+  loading?: boolean;
 };
 
 function TruncatedCategoryLabel({ text }: { text: string }) {
@@ -44,6 +45,7 @@ export function SpendingChart({
   title = "Spending Breakdown",
   description = "Top categories for selected month.",
   totalLabel = "Total Spendings",
+  loading = false,
 }: SpendingChartProps) {
   const sorted = Object.entries(summary)
     .map(([name, value]) => ({ name, value: safeNumber(value) }))
@@ -61,7 +63,23 @@ export function SpendingChart({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {data.length === 0 ? (
+        {loading ? (
+          <>
+            <div className="h-[280px] rounded-md bg-muted/70 animate-pulse" />
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <div key={`skeleton-${idx}`} className="flex items-center justify-between">
+                  <div className="h-4 w-32 rounded bg-muted/70 animate-pulse" />
+                  <div className="h-4 w-24 rounded bg-muted/70 animate-pulse" />
+                </div>
+              ))}
+              <div className="mt-3 flex items-center justify-between border-t pt-3">
+                <div className="h-4 w-28 rounded bg-muted/70 animate-pulse" />
+                <div className="h-4 w-20 rounded bg-muted/70 animate-pulse" />
+              </div>
+            </div>
+          </>
+        ) : data.length === 0 ? (
           <p className="text-sm text-muted-foreground">No summary available yet for this month.</p>
         ) : (
           <>

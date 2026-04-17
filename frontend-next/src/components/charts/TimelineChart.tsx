@@ -9,12 +9,14 @@ type TimelineChartProps = {
   points: TotalsTimelinePoint[];
   title?: string;
   description?: string;
+  loading?: boolean;
 };
 
 export function TimelineChart({
   points,
   title = "Income / Spending / Investment Timeline",
   description = "Track how totals change over time.",
+  loading = false,
 }: TimelineChartProps) {
   return (
     <Card>
@@ -23,7 +25,16 @@ export function TimelineChart({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        {points.length === 0 ? (
+        {loading ? (
+          <div className="space-y-3">
+            <div className="h-[320px] w-full rounded-md bg-muted/70 animate-pulse" />
+            <div className="grid grid-cols-3 gap-2">
+              <div className="h-4 rounded bg-muted/70 animate-pulse" />
+              <div className="h-4 rounded bg-muted/70 animate-pulse" />
+              <div className="h-4 rounded bg-muted/70 animate-pulse" />
+            </div>
+          </div>
+        ) : points.length === 0 ? (
           <p className="text-sm text-muted-foreground">No monthly output data available yet for this range.</p>
         ) : (
           <div className="h-[320px] w-full">
