@@ -2,6 +2,7 @@ import {
   AppState,
   AssetsResponse,
   ExpensesSummary,
+  TotalsTimelineResponse,
   FinalizeRunPayload,
   FinalizeRunResponse,
   PrepareRunPayload,
@@ -69,6 +70,17 @@ export function getInvestmentsSummary(year: string, month: number) {
   return apiFetch<ExpensesSummary>(
     `/investments/summary?year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}`,
   );
+}
+
+export function getTotalsTimeline(mode: "year" | "trailing", year?: string, trailingMonths?: number) {
+  const params = new URLSearchParams({ mode });
+  if (year) {
+    params.set("year", year);
+  }
+  if (typeof trailingMonths === "number") {
+    params.set("trailing_months", String(trailingMonths));
+  }
+  return apiFetch<TotalsTimelineResponse>(`/totals/timeline?${params.toString()}`);
 }
 
 export function prepareRun(payload: PrepareRunPayload) {

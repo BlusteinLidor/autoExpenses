@@ -47,6 +47,20 @@ export type ProgressResponse = {
 
 export type ExpensesSummary = Record<string, number>;
 
+export type TotalsTimelinePoint = {
+  year: number;
+  month: number;
+  label: string;
+  spending: number;
+  income: number;
+  investments: number;
+};
+
+export type TotalsTimelineResponse = {
+  mode: "year" | "trailing";
+  points: TotalsTimelinePoint[];
+};
+
 export type PrepareRunPayload = {
   year: string;
   month: number;

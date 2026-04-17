@@ -336,6 +336,58 @@ def investments_summary(year: int, month: int) -> Dict[str, float]:
     )
 
 
+@app.get("/totals/timeline")
+def totals_timeline(
+    mode: str = "year",
+    year: int | None = None,
+    trailing_months: int = 12,
+) -> Dict[str, Any]:
+    """
+    Build a timeline of month totals for spending/income/investments.
+    mode:
+      - "year": use all 12 months from selected year.
+      - "trailing": use latest N available output months.
+    """
+    paths = get_paths()
+    available_months = _available_output_months(paths.data_dir)
+    if not available_months:
+        return {"mode": mode, "points": []}
+
+    points: list[Dict[str, Any]] = []
+    if mode == "year":
+        selected_year = year or datetime.now().year
+        for month in range(1, 13):
+            totals = _monthly_totals(selected_year, month)
+            points.append(
+                {
+                    "year": selected_year,
+                    "month": month,
+                    "label": f"{selected_year}-{str(month).zfill(2)}",
+                    **totals,
+                }
+            )
+    elif mode == "trailing":
+        safe_trailing_months = max(1, min(120, int(trailing_months)))
+        selected = sorted(available_months)[-safe_trailing_months:]
+        for month_year, month in selected:
+            totals = _monthly_totals(month_year, month)
+            points.append(
+                {
+                    "year": month_year,
+                    "month": month,
+                    "label": f"{month_year}-{str(month).zfill(2)}",
+                    **totals,
+                }
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail='Invalid mode. Please use "year" or "trailing".',
+        )
+
+    return {"mode": mode, "points": points}
+
+
 def _summarize_sheet_row_ranges(
     *,
     year: int,
@@ -389,6 +441,55 @@ def _summarize_sheet_row_ranges(
                 summary[str(category)] = summary.get(str(category), 0.0) + amount
 
     return summary
+
+
+def _monthly_totals(year: int, month: int) -> Dict[str, float]:
+    spending = sum(
+        _summarize_sheet_row_ranges(
+            year=year,
+            month=month,
+            row_ranges=[(17, 45), (49, 91)],
+        ).values()
+    )
+    income = sum(
+        _summarize_sheet_row_ranges(
+            year=year,
+            month=month,
+            row_ranges=[(6, 13)],
+        ).values()
+    )
+    investments = sum(
+        _summarize_sheet_row_ranges(
+            year=year,
+            month=month,
+            row_ranges=[(95, 105)],
+        ).values()
+    )
+    return {
+        "spending": float(spending),
+        "income": float(income),
+        "investments": float(investments),
+    }
+
+
+def _available_output_months(data_dir: Path) -> list[tuple[int, int]]:
+    """
+    Return all months that have generated output workbook files.
+    Pattern: expenses_output_YYYY_MM.xlsx
+    """
+    months: set[tuple[int, int]] = set()
+    for file_path in data_dir.glob("expenses_output_????_??.xlsx"):
+        stem_parts = file_path.stem.split("_")
+        if len(stem_parts) < 4:
+            continue
+        year_str, month_str = stem_parts[-2], stem_parts[-1]
+        if not (year_str.isdigit() and month_str.isdigit()):
+            continue
+        year = int(year_str)
+        month = int(month_str)
+        if 1 <= month <= 12:
+            months.add((year, month))
+    return sorted(months)
 
 
 @app.get("/{asset_path:path}")

@@ -2,11 +2,11 @@
 
 import { AssetsPanel } from "@/components/assets/AssetsPanel";
 import { SpendingChart } from "@/components/charts/SpendingChart";
+import { TimelineChart } from "@/components/charts/TimelineChart";
 import { ReviewTable } from "@/components/review/ReviewTable";
 import { ProgressPanel } from "@/components/run/ProgressPanel";
 import { RunForm } from "@/components/run/RunForm";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -15,6 +15,7 @@ import {
   getExpensesSummary,
   getIncomeSummary,
   getInvestmentsSummary,
+  getTotalsTimeline,
   getRunProgress,
   getState,
   prepareRun,
@@ -44,6 +45,8 @@ export default function DashboardPage() {
   const [runMonth, setRunMonth] = useState(new Date().getMonth() + 1);
   const [breakdownYear, setBreakdownYear] = useState(String(new Date().getFullYear()));
   const [breakdownMonth, setBreakdownMonth] = useState(new Date().getMonth() + 1);
+  const [timelineMode, setTimelineMode] = useState<"year" | "trailing">("year");
+  const [timelineTrailingMonths, setTimelineTrailingMonths] = useState(12);
   const [runToken, setRunToken] = useState("");
   const [status, setStatus] = useState("Ready");
   const [review, setReview] = useState<PrepareRunResponse | null>(null);
@@ -60,6 +63,15 @@ export default function DashboardPage() {
   const investmentsSummaryQuery = useQuery({
     queryKey: ["investments-summary", breakdownYear, breakdownMonth],
     queryFn: () => getInvestmentsSummary(breakdownYear, breakdownMonth),
+  });
+  const timelineQuery = useQuery({
+    queryKey: ["totals-timeline", timelineMode, breakdownYear, timelineTrailingMonths],
+    queryFn: () =>
+      getTotalsTimeline(
+        timelineMode,
+        timelineMode === "year" ? breakdownYear : undefined,
+        timelineMode === "trailing" ? timelineTrailingMonths : undefined,
+      ),
   });
 
   const progressQuery = useQuery({
@@ -92,6 +104,7 @@ export default function DashboardPage() {
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["income-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["investments-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["totals-timeline"] });
     },
     onError: (mutationError) => {
       setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
@@ -252,6 +265,47 @@ export default function DashboardPage() {
           totalLabel="Total Investments"
         />
       </section>
+
+      <section className="rounded-lg border border-border/70 bg-card/40 p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-2">
+            <Label>Timeline Range</Label>
+            <Select
+              value={timelineMode === "year" ? "selected-year" : `trailing-${timelineTrailingMonths}`}
+              onValueChange={(value) => {
+                if (!value) {
+                  setTimelineMode("year");
+                  return;
+                }
+                if (value === "selected-year") {
+                  setTimelineMode("year");
+                  return;
+                }
+                const trailingMonths = Number(value.replace("trailing-", ""));
+                setTimelineMode("trailing");
+                setTimelineTrailingMonths(Number.isFinite(trailingMonths) ? trailingMonths : 12);
+              }}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Timeline range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="selected-year">Selected year (Jan-Dec)</SelectItem>
+                <SelectItem value="trailing-12">Last 12 months</SelectItem>
+                <SelectItem value="trailing-24">Last 24 months</SelectItem>
+                <SelectItem value="trailing-36">Last 36 months</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="pb-2 text-sm text-muted-foreground">
+            {timelineMode === "year"
+              ? `Timeline for ${breakdownYear}`
+              : `Timeline for latest ${timelineTrailingMonths} months`}
+          </p>
+        </div>
+      </section>
+
+      <TimelineChart points={timelineQuery.data?.points ?? []} />
     </main>
   );
 }
