@@ -36,7 +36,39 @@ export type PrepareRunResponse = {
 
 export type FinalizeRunResponse = {
   output_excel: string;
+  yearly_output_excel?: string;
+  drive_upload?: DriveUploadResult;
   state: AppState;
+};
+
+export type DriveStatusResponse = {
+  configured: boolean;
+  connected: boolean;
+  email?: string | null;
+  last_error?: string | null;
+  updated_at?: string | null;
+};
+
+export type DriveConnectStartResponse = {
+  authorization_url: string;
+};
+
+export type DriveUploadFileResult = {
+  file_name?: string;
+  file_id?: string;
+  web_view_link?: string;
+  action?: "created" | "updated";
+  success: boolean;
+};
+
+export type DriveUploadResult = {
+  attempted: boolean;
+  connected: boolean;
+  success: boolean;
+  error?: string | null;
+  folder_path?: string | null;
+  monthly_file?: DriveUploadFileResult | null;
+  yearly_file?: DriveUploadFileResult | null;
 };
 
 export type ProgressResponse = {

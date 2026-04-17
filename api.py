@@ -3,13 +3,16 @@ from typing import Dict, Any
 from numbers import Number
 from uuid import uuid4
 from datetime import datetime, timezone
+import os
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import get_paths, get_state, update_state
+from config import get_paths, get_state, load_env, update_state
 from pipeline import run_for_month, prepare_for_month, finalize_for_month
 from data import monthToExpenseColDict
 from openpyxl import load_workbook
@@ -19,11 +22,21 @@ from handleExcel import (
     build_ai_output_from_items,
     is_card_statement_duplicate_expense,
 )
+from google_drive_service import (
+    create_oauth_start_url,
+    disconnect_drive,
+    get_drive_status,
+    handle_oauth_callback,
+    upload_month_files,
+)
 
 
 app = FastAPI(title="AutoExpenses API")
 _PENDING_REVIEWS: Dict[str, Dict[str, Any]] = {}
 _PIPELINE_PROGRESS: Dict[str, Dict[str, Any]] = {}
+
+# Ensure API routes (including Drive status/connect) can read .env configuration.
+load_env()
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -234,7 +247,7 @@ def run_month_finalize(payload: Dict[str, Any]) -> Dict[str, Any]:
         _update_progress("Step 5/5: Filling workbook...")
 
     try:
-        final_path = finalize_for_month(
+        final_path, yearly_total_path = finalize_for_month(
             year=review_state["year"],
             month=review_state["month"],
             output_workbook_path=Path(review_state["output_workbook_path"]),
@@ -262,8 +275,35 @@ def run_month_finalize(payload: Dict[str, Any]) -> Dict[str, Any]:
             "done": True,
         }
 
+    drive_status = get_drive_status()
+    drive_upload: Dict[str, Any] = {
+        "attempted": False,
+        "connected": bool(drive_status.get("connected", False)),
+        "success": False,
+        "error": None,
+        "folder_path": None,
+        "monthly_file": None,
+        "yearly_file": None,
+    }
+    if drive_status.get("configured") and drive_status.get("connected"):
+        drive_upload["attempted"] = True
+        try:
+            upload_result = upload_month_files(
+                year=str(review_state["year"]),
+                month=str(review_state["month"]),
+                monthly_path=final_path,
+                yearly_total_path=yearly_total_path,
+            )
+            drive_upload.update(upload_result)
+            drive_upload["success"] = True
+        except Exception as upload_error:
+            drive_upload["success"] = False
+            drive_upload["error"] = str(upload_error)
+
     return {
         "output_excel": str(final_path),
+        "yearly_output_excel": str(yearly_total_path),
+        "drive_upload": drive_upload,
         "state": get_state(),
     }
 
@@ -279,6 +319,44 @@ def run_month_progress(run_token: str) -> Dict[str, Any]:
 @app.get("/state")
 def read_state() -> Dict[str, Any]:
     return get_state()
+
+
+@app.get("/drive/status")
+def drive_status() -> Dict[str, Any]:
+    return get_drive_status()
+
+
+@app.post("/drive/connect/start")
+def drive_connect_start() -> Dict[str, str]:
+    try:
+        return create_oauth_start_url()
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/drive/connect/callback")
+def drive_connect_callback(code: str = "", state: str = "") -> RedirectResponse:
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth callback code/state.")
+
+    frontend_url = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:3000").rstrip("/")
+    try:
+        handle_oauth_callback(code=code, state=state)
+        return RedirectResponse(
+            url=f"{frontend_url}/?drive_connected=1",
+            status_code=302,
+        )
+    except Exception as error:
+        error_text = quote_plus(str(error))
+        return RedirectResponse(
+            url=f"{frontend_url}/?drive_connected=0&drive_error={error_text}",
+            status_code=302,
+        )
+
+
+@app.post("/drive/disconnect")
+def drive_disconnect() -> Dict[str, Any]:
+    return disconnect_drive()
 
 
 @app.post("/assets")

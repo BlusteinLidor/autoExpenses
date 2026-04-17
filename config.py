@@ -17,6 +17,7 @@ class Paths:
     state_file: Path
     assets_file: Path
     category_corrections_file: Path
+    drive_state_file: Path
 
 
 def get_paths() -> Paths:
@@ -29,6 +30,7 @@ def get_paths() -> Paths:
     state_file = data_dir / "state.json"
     assets_file = data_dir / "assets.json"
     category_corrections_file = data_dir / "category_corrections.json"
+    drive_state_file = data_dir / "drive_state.json"
 
     # Ensure required directories exist
     for d in (data_dir, max_exports_dir, leumi_exports_dir):
@@ -44,6 +46,7 @@ def get_paths() -> Paths:
         state_file=state_file,
         assets_file=assets_file,
         category_corrections_file=category_corrections_file,
+        drive_state_file=drive_state_file,
     )
 
 

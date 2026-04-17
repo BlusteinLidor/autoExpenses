@@ -97,7 +97,7 @@ def finalize_for_month(
     output_workbook_path: Path,
     categorized_output: str,
     progress_callback: Optional[Callable[[str], None]] = None,
-) -> Path:
+) -> Tuple[Path, Path]:
     """Fill workbook, sync yearly total workbook and update state."""
     try:
         _emit_progress(progress_callback, "Step 5/5: Filling workbook...")
@@ -112,7 +112,7 @@ def finalize_for_month(
         raise RuntimeError(f"Pipeline failed at step 5 (fillCells): {e}") from e
 
     update_state({"last_filled_year": year, "last_filled_month": month})
-    return output_workbook_path
+    return output_workbook_path, total_workbook_path
 
 
 def run_for_month(
@@ -127,11 +127,11 @@ def run_for_month(
         include_leumi=include_leumi,
         progress_callback=progress_callback,
     )
-    finalize_for_month(
+    final_monthly, _ = finalize_for_month(
         year=year,
         month=month,
         output_workbook_path=output_workbook_path,
         categorized_output=sorted_expenses,
         progress_callback=progress_callback,
     )
-    return source_excel_path, output_workbook_path
+    return source_excel_path, final_monthly

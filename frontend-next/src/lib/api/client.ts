@@ -8,6 +8,8 @@ import {
   PrepareRunPayload,
   PrepareRunResponse,
   ProgressResponse,
+  DriveStatusResponse,
+  DriveConnectStartResponse,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ?? "";
@@ -121,4 +123,20 @@ export function finalizeRun(payload: FinalizeRunPayload) {
 
 export function getRunProgress(runToken: string) {
   return apiFetch<ProgressResponse>(`/run-month/progress/${encodeURIComponent(runToken)}`);
+}
+
+export function getDriveStatus() {
+  return apiFetch<DriveStatusResponse>("/drive/status");
+}
+
+export function startDriveConnect() {
+  return apiFetch<DriveConnectStartResponse>("/drive/connect/start", {
+    method: "POST",
+  });
+}
+
+export function disconnectDrive() {
+  return apiFetch<DriveStatusResponse>("/drive/disconnect", {
+    method: "POST",
+  });
 }

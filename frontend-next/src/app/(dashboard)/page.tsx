@@ -7,10 +7,13 @@ import { ReviewTable } from "@/components/review/ReviewTable";
 import { ProgressPanel } from "@/components/run/ProgressPanel";
 import { RunForm } from "@/components/run/RunForm";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  disconnectDrive,
   finalizeRun,
+  getDriveStatus,
   getAssets,
   getExpensesSummary,
   getIncomeSummary,
@@ -20,11 +23,12 @@ import {
   getState,
   prepareRun,
   saveAssets,
+  startDriveConnect,
 } from "@/lib/api/client";
-import { AssetsResponse, FinalizeRunItem, PrepareRunResponse } from "@/lib/api/types";
+import { AssetsResponse, DriveUploadResult, FinalizeRunItem, PrepareRunResponse } from "@/lib/api/types";
 import { generateRunToken, monthName, safeNumber } from "@/lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 function nextMonthFromState(state: Awaited<ReturnType<typeof getState>> | undefined) {
   const lastYear = Number(state?.last_filled_year);
@@ -61,6 +65,11 @@ export default function DashboardPage() {
   const [status, setStatus] = useState("Ready");
   const [review, setReview] = useState<PrepareRunResponse | null>(null);
   const [error, setError] = useState("");
+  const [driveUploadResult, setDriveUploadResult] = useState<DriveUploadResult | null>(null);
+  const [driveConnectResult, setDriveConnectResult] = useState<{
+    connected: boolean | null;
+    error: string | null;
+  }>({ connected: null, error: null });
 
   const summaryQuery = useQuery({
     queryKey: ["summary", breakdownYear, breakdownMonth],
@@ -102,6 +111,7 @@ export default function DashboardPage() {
     enabled: Boolean(runToken),
     refetchInterval: (query) => (query.state.data?.done ? false : 1200),
   });
+  const driveStatusQuery = useQuery({ queryKey: ["drive-status"], queryFn: getDriveStatus });
 
   const prepareMutation = useMutation({
     mutationFn: prepareRun,
@@ -117,16 +127,18 @@ export default function DashboardPage() {
 
   const finalizeMutation = useMutation({
     mutationFn: finalizeRun,
-    onSuccess: () => {
+    onSuccess: (data) => {
       setReview(null);
       setStatus("Workbook filled successfully.");
       setError("");
+      setDriveUploadResult(data.drive_upload ?? null);
       void queryClient.invalidateQueries({ queryKey: ["state"] });
       void queryClient.invalidateQueries({ queryKey: ["assets"] });
       void queryClient.invalidateQueries({ queryKey: ["summary"] });
       void queryClient.invalidateQueries({ queryKey: ["income-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["investments-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["totals-timeline"] });
+      void queryClient.invalidateQueries({ queryKey: ["drive-status"] });
     },
     onError: (mutationError) => {
       setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
@@ -143,6 +155,26 @@ export default function DashboardPage() {
       setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
     },
   });
+  const driveConnectMutation = useMutation({
+    mutationFn: startDriveConnect,
+    onSuccess: (data) => {
+      window.location.assign(data.authorization_url);
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
+    },
+  });
+  const driveDisconnectMutation = useMutation({
+    mutationFn: disconnectDrive,
+    onSuccess: () => {
+      setDriveUploadResult(null);
+      setStatus("Google Drive disconnected.");
+      void queryClient.invalidateQueries({ queryKey: ["drive-status"] });
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
+    },
+  });
 
   const suggestion = nextMonthFromState(stateQuery.data);
   const selectableYears = useMemo(() => {
@@ -150,18 +182,42 @@ export default function DashboardPage() {
     const years = new Set([String(nowYear), String(nowYear - 1), String(nowYear - 2), suggestion.year]);
     return [...years].sort((a, b) => Number(a) - Number(b));
   }, [suggestion.year]);
-  const normalizedTimelineRange = useMemo(() => {
+  const normalizedTimelineRange = (() => {
     const start = { year: timelineStartYear, month: timelineStartMonth };
     const end = { year: timelineEndYear, month: timelineEndMonth };
     if (toTimelineComparable(start.year, start.month) <= toTimelineComparable(end.year, end.month)) {
       return { start, end };
     }
     return { start: end, end: start };
-  }, [timelineStartYear, timelineStartMonth, timelineEndYear, timelineEndMonth]);
+  })();
 
   const lastFilled = stateQuery.data?.last_filled_year && stateQuery.data?.last_filled_month
     ? `Last filled: ${monthName(Number(stateQuery.data.last_filled_month))} ${stateQuery.data.last_filled_year}`
     : "";
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("drive_connected");
+    const driveError = params.get("drive_error");
+    if (connected === "1") {
+      setDriveConnectResult({ connected: true, error: null });
+      return;
+    }
+    if (connected === "0") {
+      setDriveConnectResult({
+        connected: false,
+        error: driveError || "Google Drive connection failed.",
+      });
+      return;
+    }
+    setDriveConnectResult({ connected: null, error: null });
+  }, []);
+
+  useEffect(() => {
+    if (driveConnectResult.connected === true || driveConnectResult.connected === false) {
+      void queryClient.invalidateQueries({ queryKey: ["drive-status"] });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [driveConnectResult.connected, queryClient]);
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-8">
@@ -177,6 +233,18 @@ export default function DashboardPage() {
         <Alert variant="destructive">
           <AlertTitle>Something went wrong</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {driveConnectResult.connected === true ? (
+        <Alert>
+          <AlertTitle>Google Drive connected</AlertTitle>
+          <AlertDescription>Your dashboard is now connected to Google Drive.</AlertDescription>
+        </Alert>
+      ) : null}
+      {driveConnectResult.connected === false && driveConnectResult.error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Google Drive connection failed</AlertTitle>
+          <AlertDescription>{driveConnectResult.error}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -207,6 +275,86 @@ export default function DashboardPage() {
           lastFilled={lastFilled}
         />
       </section>
+
+      <section className="rounded-lg border border-border/70 bg-card/40 p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-medium">Google Drive</h2>
+            {!driveStatusQuery.data?.configured ? (
+              <p className="text-sm text-muted-foreground">
+                OAuth is not configured on the server yet.
+              </p>
+            ) : driveStatusQuery.data?.connected ? (
+              <p className="text-sm text-muted-foreground">
+                Connected as {driveStatusQuery.data.email || "your Google account"}.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Not connected. Connect to auto-upload files to AutoExpenses/{`{year}`}/{`{month}`}.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {driveStatusQuery.data?.connected ? (
+              <Button
+                variant="outline"
+                onClick={() => driveDisconnectMutation.mutate()}
+                disabled={driveDisconnectMutation.isPending}
+              >
+                {driveDisconnectMutation.isPending ? "Disconnecting..." : "Disconnect"}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => driveConnectMutation.mutate()}
+                disabled={!driveStatusQuery.data?.configured || driveConnectMutation.isPending}
+              >
+                {driveConnectMutation.isPending ? "Opening Google..." : "Connect Google Drive"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {driveUploadResult ? (
+        <Alert variant={driveUploadResult.success ? "default" : "destructive"}>
+          <AlertTitle>
+            {driveUploadResult.success
+              ? "Google Drive upload completed"
+              : "Google Drive upload did not complete"}
+          </AlertTitle>
+          <AlertDescription>
+            {driveUploadResult.success ? (
+              <>
+                Uploaded to <strong>{driveUploadResult.folder_path}</strong>.
+                {"  "}
+                {driveUploadResult.monthly_file?.web_view_link ? (
+                  <a
+                    className="underline"
+                    href={driveUploadResult.monthly_file.web_view_link}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Monthly file
+                  </a>
+                ) : null}
+                {"  "}
+                {driveUploadResult.yearly_file?.web_view_link ? (
+                  <a
+                    className="underline"
+                    href={driveUploadResult.yearly_file.web_view_link}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Yearly file
+                  </a>
+                ) : null}
+              </>
+            ) : (
+              driveUploadResult.error || "Local run succeeded, but Google Drive upload failed."
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {review ? (
         <ReviewTable
