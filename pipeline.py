@@ -7,6 +7,7 @@ from getExcelFileFromMax import getExcelFile
 from getExcelFileFromLeumi import getLeumiData
 from handleExcel import getExpenses, fillCells
 from merge_expenses import merge_max_and_leumi
+from yearly_totals import sync_month_to_year_total
 
 
 def _emit_progress(progress_callback: Optional[Callable[[str], None]], step_text: str) -> None:
@@ -95,11 +96,16 @@ def finalize_for_month(
     categorized_output: str,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Path:
-    """Fill workbook with reviewed categories and update state."""
+    """Fill workbook, sync yearly total workbook and update state."""
     try:
         _emit_progress(progress_callback, "Step 5/5: Filling workbook...")
         print(f"[pipeline] Step 5: fillCells into {output_workbook_path}")
         fillCells(str(output_workbook_path), categorized_output, month=month)
+        total_workbook_path = sync_month_to_year_total(year=year, month=month)
+        print(
+            f"[pipeline] Yearly total synced for {year}-{str(month).zfill(2)} "
+            f"into {total_workbook_path}"
+        )
     except Exception as e:
         raise RuntimeError(f"Pipeline failed at step 5 (fillCells): {e}") from e
 
