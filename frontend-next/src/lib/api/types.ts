@@ -17,11 +17,20 @@ export type AssetsResponse = {
   leumi_balance: number | string | null;
 };
 
+export type CategoryGroup = {
+  id: string;
+  label: string;
+  categories: string[];
+};
+
 export type ReviewItem = {
   name: string;
   cost: number;
   category: string;
+  is_income?: boolean;
   is_possible_duplicate: boolean;
+  needs_manual_review?: boolean;
+  error_reason?: string | null;
 };
 
 export type PrepareRunResponse = {
@@ -30,8 +39,10 @@ export type PrepareRunResponse = {
   source_excel: string;
   output_excel: string;
   allowed_categories: string[];
+  category_groups?: CategoryGroup[];
   items: ReviewItem[];
   parse_errors: string[];
+  warnings?: string[];
 };
 
 export type FinalizeRunResponse = {

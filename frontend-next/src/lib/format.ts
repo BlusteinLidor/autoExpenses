@@ -32,6 +32,22 @@ export function isSplitExpenseName(name: string) {
   return name.replace(/\s+/g, " ").trim() === "העברה דיגיטל";
 }
 
+export function incomeCategories(categoryGroups?: { id: string; categories: string[] }[]) {
+  const incomeGroup = categoryGroups?.find((group) => group.id === "income");
+  return incomeGroup?.categories ?? [];
+}
+
+export function expenseCategories(
+  categories: string[],
+  categoryGroups?: { id: string; categories: string[] }[],
+) {
+  const income = new Set(incomeCategories(categoryGroups));
+  if (income.size === 0) {
+    return categories;
+  }
+  return categories.filter((category) => !income.has(category));
+}
+
 export function generateRunToken() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();

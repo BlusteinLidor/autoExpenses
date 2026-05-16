@@ -5,6 +5,29 @@ from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 
+# Column B rows in template_expenses.xlsx that hold category labels.
+# Excludes non-category rows: 13-16, 45-48, 91-94, and 105+.
+TEMPLATE_INCOME_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = ((6, 13),)
+TEMPLATE_NECESSARY_EXPENSE_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = ((17, 45),)
+TEMPLATE_LUXURY_EXPENSE_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = ((49, 91),)
+TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = (
+    *TEMPLATE_NECESSARY_EXPENSE_CATEGORY_ROW_RANGES,
+    *TEMPLATE_LUXURY_EXPENSE_CATEGORY_ROW_RANGES,
+)
+TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = ((95, 105),)
+TEMPLATE_CATEGORY_ROW_RANGES: tuple[tuple[int, int], ...] = (
+    *TEMPLATE_INCOME_CATEGORY_ROW_RANGES,
+    *TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES,
+    *TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES,
+)
+
+
+def template_category_rows() -> list[int]:
+    rows: list[int] = []
+    for start, end_exclusive in TEMPLATE_CATEGORY_ROW_RANGES:
+        rows.extend(range(start, end_exclusive))
+    return rows
+
 
 @dataclass
 class Paths:

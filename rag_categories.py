@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Any, Optional
 
 from openpyxl import load_workbook
 
-from config import get_paths
+from config import get_paths, template_category_rows
 
 
 @dataclass
@@ -82,8 +82,7 @@ def _get_allowed_subcategories() -> List[str]:
     try:
         labels: List[str] = []
         seen = set()
-        template_rows = list(range(6, 13)) + list(range(17, 106))
-        for r in template_rows:
+        for r in template_category_rows():
             v = ws[f"B{r}"].value
             if v is None:
                 continue
@@ -127,12 +126,10 @@ def _load_historical_expenses() -> List[HistoricalExpense]:
         wb = load_workbook(str(workbook_path), data_only=True)
         ws = wb.active
         try:
-            first_row = 17
-            last_row = 105
             category_col = "B"
             month_cols = range(3, 15)  # C..N
 
-            for row in range(first_row, last_row):
+            for row in template_category_rows():
                 category = ws[f"{category_col}{row}"].value
                 if not category:
                     continue

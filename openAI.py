@@ -5,14 +5,14 @@ from openpyxl import load_workbook
 
 from openai import OpenAI
 
-from config import get_paths, load_env, validate_env
+from config import get_paths, load_env, template_category_rows, validate_env
 from data import fullDict
 from rag_categories import get_examples_for_prompt
 
 
 def _load_allowed_subcategories_from_template() -> List[str]:
     """
-    Read expense sub-category labels from the template workbook (column B, rows 6..12 and 17..105).
+    Read expense sub-category labels from the template workbook (column B, category rows only).
     This keeps OpenAI output constrained to the exact labels that will later be matched in Excel.
     """
     paths = get_paths()
@@ -23,8 +23,7 @@ def _load_allowed_subcategories_from_template() -> List[str]:
     ws = wb.active
     labels: List[str] = []
     seen = set()
-    template_rows = list(range(6, 13)) + list(range(17, 106))
-    for r in template_rows:
+    for r in template_category_rows():
         v = ws[f"B{r}"].value
         if v is None:
             continue

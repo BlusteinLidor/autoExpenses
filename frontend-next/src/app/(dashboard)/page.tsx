@@ -280,7 +280,11 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
             <h2 className="text-lg font-medium">Google Drive</h2>
-            {!driveStatusQuery.data?.configured ? (
+            {driveStatusQuery.isError ? (
+              <p className="text-sm text-destructive">
+                Could not load Google Drive status. Check that the API server is running.
+              </p>
+            ) : !driveStatusQuery.data?.configured ? (
               <p className="text-sm text-muted-foreground">
                 OAuth is not configured on the server yet.
               </p>
@@ -290,7 +294,9 @@ export default function DashboardPage() {
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Not connected. Connect to auto-upload files to AutoExpenses/{`{year}`}/{`{month}`}.
+                {driveStatusQuery.data.last_error
+                  ? driveStatusQuery.data.last_error
+                  : `Not connected. Connect to auto-upload files to AutoExpenses/${"{year}"}/${"{month}"}.`}
               </p>
             )}
           </div>
@@ -360,6 +366,8 @@ export default function DashboardPage() {
         <ReviewTable
           items={review.items}
           categories={review.allowed_categories}
+          categoryGroups={review.category_groups}
+          warnings={review.warnings}
           busy={finalizeMutation.isPending}
           onCancel={() => {
             setReview(null);

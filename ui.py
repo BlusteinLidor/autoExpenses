@@ -31,7 +31,7 @@ def runPipeline():
         def _progress(step_text: str):
             loading(step_text)
 
-        _, output_path, ai_output = prepare_for_month(
+        _, output_path, ai_output, _, _ = prepare_for_month(
             year=year,
             month=month,
             include_leumi=include_leumi,

@@ -2,7 +2,14 @@ from openpyxl import load_workbook
 from openpyxl.comments import Comment
 from openAI import sortExpensesAI
 from data import months, monthToExpenseColDict, fullDict
-from config import get_paths
+from config import (
+    TEMPLATE_INCOME_CATEGORY_ROW_RANGES,
+    TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES,
+    TEMPLATE_LUXURY_EXPENSE_CATEGORY_ROW_RANGES,
+    TEMPLATE_NECESSARY_EXPENSE_CATEGORY_ROW_RANGES,
+    get_paths,
+    template_category_rows,
+)
 from rag_categories import get_category_corrections
 from difflib import SequenceMatcher
 import re
@@ -19,7 +26,6 @@ _INCOME_NAME_CATEGORY_OVERRIDES = {
     "עירית מגדל ה~י": "שכר עבודה אלה - נטו",
     "נאנומושן בע\"~י": "שכר עבודה לידור - נטו",
 }
-
 
 def _normalize_for_fuzzy_name(s: str) -> str:
     return re.sub(r"[^א-תa-zA-Z0-9]", "", str(s or "").lower())
@@ -52,6 +58,39 @@ def _normalize_income_name_key(s: str) -> str:
     return normalized
 
 
+# Max credits that fund investments (not income). Positive card amounts are otherwise
+# treated as income; these names must stay in the investment section of the template.
+_INVESTMENT_TRANSFER_NAME_KEYS = frozenset(
+    {
+        _normalize_income_name_key("צובר ושב"),
+    }
+)
+_INVESTMENT_NAME_CATEGORY_OVERRIDES = {
+    "צובר ושב": "הפקדות לפוליסת חיסכון פיננסי",
+}
+
+
+def is_investment_transfer_name(name: str) -> bool:
+    return _normalize_income_name_key(name) in _INVESTMENT_TRANSFER_NAME_KEYS
+
+
+def resolve_transaction_is_income(name: str, raw_is_income: bool) -> bool:
+    if is_investment_transfer_name(name):
+        return False
+    return bool(raw_is_income)
+
+
+def _normalize_expense_name_for_corrections(s: str) -> str:
+    """
+    Normalize expense names so `category_corrections.json` matches OpenAI output.
+    OpenAI instruction: replace '-' with '~' in expense names.
+    """
+    normalized = str(s or "").strip()
+    normalized = normalized.replace("-", "~")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
 def _safe_float_from_string(s: str, context: str = ""):
     """Parse a string to float; return (value, None) or (0.0, error_msg). Used for AI output and debug."""
     if s is None or (isinstance(s, str) and not s.strip()):
@@ -71,23 +110,54 @@ def _safe_float_from_string(s: str, context: str = ""):
         return 0.0, str(e) + (f" ({context})" if context else "")
 
 
-def get_allowed_categories(outputWorkbookPath: str) -> list[str]:
-    """Read allowed (expense) sub-category labels from template/output workbook (column B, rows 6..12 and 17..105)."""
+_CATEGORY_GROUP_SPECS: tuple[tuple[str, str, tuple[tuple[int, int], ...]], ...] = (
+    ("income", "Income", TEMPLATE_INCOME_CATEGORY_ROW_RANGES),
+    ("necessary_expenses", "Necessary Expenses", TEMPLATE_NECESSARY_EXPENSE_CATEGORY_ROW_RANGES),
+    ("luxury_expenses", "Luxury Expenses", TEMPLATE_LUXURY_EXPENSE_CATEGORY_ROW_RANGES),
+    ("investments", "Investments", TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES),
+)
+
+
+def _categories_from_row_ranges(
+    ws,
+    row_ranges: tuple[tuple[int, int], ...],
+    seen: set[str] | None = None,
+) -> list[str]:
+    categories: list[str] = []
+    local_seen = seen if seen is not None else set()
+    for start, end_exclusive in row_ranges:
+        for r in range(start, end_exclusive):
+            v = ws[f"B{r}"].value
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s and s not in local_seen:
+                categories.append(s)
+                local_seen.add(s)
+    return categories
+
+
+def get_allowed_category_groups(outputWorkbookPath: str) -> list[dict]:
+    """Read allowed sub-categories grouped by template section (income, expenses, investments)."""
     wb = load_workbook(outputWorkbookPath, data_only=True)
     ws = wb.active
-    categories: list[str] = []
-    category_rows = list(range(6, 13)) + list(range(17, 106))
-    seen = set()
-    for r in category_rows:
-        v = ws[f"B{r}"].value
-        if v is None:
-            continue
-        s = str(v).strip()
-        if s and s not in seen:
-            categories.append(s)
-            seen.add(s)
+    seen: set[str] = set()
+    groups: list[dict] = []
+    for group_id, label, row_ranges in _CATEGORY_GROUP_SPECS:
+        categories = _categories_from_row_ranges(ws, row_ranges, seen)
+        if categories:
+            groups.append({"id": group_id, "label": label, "categories": categories})
     wb.close()
-    return categories
+    return groups
+
+
+def get_allowed_categories(outputWorkbookPath: str) -> list[str]:
+    """Read allowed sub-category labels from template/output workbook (column B, category rows only)."""
+    return [
+        category
+        for group in get_allowed_category_groups(outputWorkbookPath)
+        for category in group["categories"]
+    ]
 
 
 def parse_ai_output_lines(openAIOutput: str) -> tuple[list[dict], list[str]]:
@@ -158,6 +228,197 @@ def parse_ai_output_lines(openAIOutput: str) -> tuple[list[dict], list[str]]:
     return parsed, errors
 
 
+def _normalize_review_name_key(name: str) -> str:
+    return _normalize_expense_name_for_corrections(name)
+
+
+def _expense_dict_is_income(expense_values) -> bool:
+    if not expense_values or len(expense_values) < 3:
+        return False
+    return bool(expense_values[2])
+
+
+def _lookup_is_income_from_dict(expenses_dict: dict | None, name: str) -> bool:
+    if is_investment_transfer_name(name):
+        return False
+    if not expenses_dict:
+        return False
+    direct = expenses_dict.get(name)
+    if direct is not None:
+        return _expense_dict_is_income(direct)
+    normalized = _normalize_review_name_key(name)
+    for expense_name, expense_values in expenses_dict.items():
+        if _normalize_review_name_key(str(expense_name)) == normalized:
+            return _expense_dict_is_income(expense_values)
+    return False
+
+
+def _workbook_row_is_income(cell_value) -> bool:
+    return cell_value in (1, True, "1", "income", "yes")
+
+
+def parse_errors_to_review_items(parse_errors: list[str]) -> list[dict]:
+    """Turn AI parse failures into review rows the user can categorize manually."""
+    review_items: list[dict] = []
+    line_pattern = re.compile(
+        r"^(?P<name>.+?)\s*-\s*(?P<amount>\(?[-+]?\d+(?:\.\d+)?\)?)\s*-\s*(?P<cat>.+?)\s*$"
+    )
+    for err in parse_errors:
+        raw_line = err
+        match = re.search(r":\s*(.+)$", err)
+        if match:
+            raw_line = match.group(1).strip()
+        line_norm = (
+            raw_line.replace("–", "-")
+            .replace("—", "-")
+            .replace("−", "-")
+            .replace("\u00a0", " ")
+        )
+        parsed_name = ""
+        parsed_cost = 0.0
+        parsed_category = ""
+        line_match = line_pattern.match(line_norm)
+        if line_match:
+            parsed_name = line_match.group("name").strip()
+            parsed_category = line_match.group("cat").strip()
+            parsed_cost, _ = _safe_float_from_string(line_match.group("amount"))
+        review_items.append(
+            {
+                "name": parsed_name or raw_line[:120] or "Unknown expense",
+                "cost": float(parsed_cost),
+                "category": parsed_category,
+                "is_possible_duplicate": bool(
+                    parsed_name and is_card_statement_duplicate_expense(parsed_name)
+                ),
+                "needs_manual_review": True,
+                "error_reason": err,
+            }
+        )
+    return review_items
+
+
+def find_expenses_missing_from_parsed(
+    expenses_dict: dict,
+    parsed_items: list[dict],
+) -> list[dict]:
+    """Find source workbook expenses that never made it into parsed AI output."""
+    parsed_keys: list[str] = []
+    for item in parsed_items:
+        key = _normalize_review_name_key(str(item.get("name", "")))
+        if key:
+            parsed_keys.append(key)
+
+    missing_items: list[dict] = []
+    for expense_name, expense_values in expenses_dict.items():
+        source_key = _normalize_review_name_key(str(expense_name))
+        if not source_key:
+            continue
+        matched = False
+        for parsed_key in parsed_keys:
+            if parsed_key == source_key:
+                matched = True
+                break
+            if SequenceMatcher(None, parsed_key, source_key).ratio() >= 0.9:
+                matched = True
+                break
+        if matched:
+            continue
+        cost_value = float(expense_values[0]) if expense_values else 0.0
+        source_category = str(expense_values[1]) if len(expense_values) > 1 else ""
+        missing_items.append(
+            {
+                "name": str(expense_name),
+                "cost": cost_value,
+                "category": source_category,
+                "is_income": _expense_dict_is_income(expense_values),
+                "is_possible_duplicate": is_card_statement_duplicate_expense(str(expense_name)),
+                "needs_manual_review": True,
+                "error_reason": "AI did not return a categorized line for this expense.",
+            }
+        )
+    return missing_items
+
+
+def build_review_items(
+    parsed_items: list[dict],
+    parse_errors: list[str],
+    expenses_dict: dict | None = None,
+) -> tuple[list[dict], list[str]]:
+    """
+    Merge successfully parsed AI items with rows that need manual review.
+    Returns (review_items, warnings).
+    """
+    warnings: list[str] = []
+    review_items: list[dict] = []
+    seen_keys: set[tuple[str, float]] = set()
+
+    def _append_item(item: dict) -> None:
+        name = str(item.get("name", "")).strip()
+        cost = abs(float(item.get("cost", 0.0)))
+        is_income = resolve_transaction_is_income(
+            name,
+            bool(item.get("is_income", False))
+            or _lookup_is_income_from_dict(expenses_dict, name),
+        )
+        category = str(item.get("category", "")).strip()
+        investment_category = {
+            _normalize_income_name_key(k): v
+            for k, v in _INVESTMENT_NAME_CATEGORY_OVERRIDES.items()
+        }.get(_normalize_income_name_key(name))
+        if investment_category:
+            category = investment_category
+        key = (_normalize_review_name_key(name), round(cost, 2), is_income)
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        review_items.append(
+            {
+                "name": name,
+                "cost": cost,
+                "category": category,
+                "is_income": is_income,
+                "is_possible_duplicate": bool(item.get("is_possible_duplicate", False)),
+                "needs_manual_review": bool(item.get("needs_manual_review", False)),
+                "error_reason": (
+                    None
+                    if item.get("error_reason") is None
+                    else str(item.get("error_reason", "")).strip() or None
+                ),
+            }
+        )
+
+    for item in parsed_items:
+        _append_item(
+            {
+                **item,
+                "is_possible_duplicate": is_card_statement_duplicate_expense(
+                    str(item.get("name", ""))
+                ),
+                "needs_manual_review": False,
+                "error_reason": None,
+            }
+        )
+
+    for item in parse_errors_to_review_items(parse_errors):
+        _append_item(item)
+
+    if expenses_dict:
+        for item in find_expenses_missing_from_parsed(expenses_dict, parsed_items):
+            _append_item(item)
+
+    manual_count = sum(1 for item in review_items if item.get("needs_manual_review"))
+    income_count = sum(1 for item in review_items if item.get("is_income"))
+    if manual_count:
+        warnings.append(
+            f"{manual_count} transaction(s) need manual categorization before finalize."
+        )
+    if income_count:
+        warnings.append(
+            f"{income_count} income transaction(s) detected — use income categories when reviewing."
+        )
+    return review_items, warnings
+
+
 def build_ai_output_from_items(items: list[dict]) -> str:
     """Build normalized AI-output-like text from reviewed items."""
     lines = []
@@ -219,15 +480,25 @@ def getExpenses(workbook_path):
         expenseNameCell = ws[expenseNameCol + str(categoryRow)]
         expenseCostCell = ws[expenseCol + str(categoryRow)]
         expenseCategoryCell = ws[categoryCol + str(categoryRow)]
+        incomeFlagCell = ws["G" + str(categoryRow)]
         raw_cost = expenseCostCell.value
         cost_value = _to_float(raw_cost)
+        is_income = resolve_transaction_is_income(
+            str(expenseNameCell.value or ""),
+            _workbook_row_is_income(incomeFlagCell.value),
+        )
         if raw_cost is not None and not isinstance(raw_cost, (int, float)):
             print(f"[getExpenses] Row {categoryRow}: B={expenseNameCell.value!r} F(raw)={raw_cost!r} -> cost={cost_value}")
         # if the expense name is already in the dict, add the cost of the expense to the last cost
 
         # if the expense name is already in the dict, add the cost of the expense to the last cost
         if expenseNameCell.value in expensesDict:
-            expensesDict[expenseNameCell.value][0] += cost_value
+            existing = expensesDict[expenseNameCell.value]
+            existing[0] += cost_value
+            if len(existing) < 3:
+                existing.append(is_income)
+            else:
+                existing[2] = existing[2] or is_income
             totalCost += cost_value
         # else, add the expense name, it's cost and it's category
         else:
@@ -236,6 +507,7 @@ def getExpenses(workbook_path):
                     expenseNameCell.value: [
                         cost_value,
                         expenseCategoryCell.value if expenseCategoryCell.value is not None else "",
+                        is_income,
                     ]
                 }
             )
@@ -255,7 +527,7 @@ def getExpenses(workbook_path):
             + str(totalCost)
         )
 
-    return expensesSorted
+    return expensesSorted, expensesDict
 
 
 # @TODO add the expenses to the final excel file - go through each line in chat's response, for each line, check the name of the expense and it's cost, add the cost to a
@@ -276,8 +548,7 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
         expenseCol = monthToExpenseColDict[int(month)]
 
     errorString = ""
-    # Rows 6..12 and 17..105 are expense sub-categories we allow matching into.
-    category_rows = list(range(6, 13)) + list(range(17, 106))
+    category_rows = template_category_rows()
 
     # Build allowed categories from the template itself (column B in category_rows)
     allowed_categories: list[str] = []
@@ -300,16 +571,6 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
             .replace("״", '"')
             .strip()
         )
-
-    def _normalize_expense_name_for_corrections(s: str) -> str:
-        """
-        Normalize expense names so `category_corrections.json` matches OpenAI output.
-        OpenAI instruction: replace '-' with '~' in expense names.
-        """
-        s = str(s or "").strip()
-        s = s.replace("-", "~")
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
 
     # Map normalized fullDict main-category -> list of allowed template sub-categories
     allowed_norm_to_label = {_normalize(cat): cat for cat in allowed_categories}
@@ -370,6 +631,10 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
         _normalize_income_name_key(k): v
         for k, v in _INCOME_NAME_CATEGORY_OVERRIDES.items()
     }
+    investment_overrides_norm = {
+        _normalize_income_name_key(k): v
+        for k, v in _INVESTMENT_NAME_CATEGORY_OVERRIDES.items()
+    }
 
     # split OpenAI's output to separate lines
     eachLineList = [line.strip() for line in openAIOutput.split("\n") if line.strip()]
@@ -427,6 +692,10 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
                     else _best_category_match(_DEFAULT_INCOME_FALLBACK_CATEGORY)
                 )
             category = forced_income_category
+
+        forced_investment_category = investment_overrides_norm.get(normalized_income_key)
+        if forced_investment_category:
+            category = forced_investment_category
 
         # If user specified a correction for this expense, use it; otherwise use AI category
         normalized_name_key = _normalize_expense_name_for_corrections(name)

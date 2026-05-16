@@ -6,11 +6,12 @@ import pandas as pd
 from get_for_ex_trans import (
     get_foreign_exchange_transactions,
     get_immediate_transactions,
+    write_empty_transactions_csv,
 )
 from add_rows_to_csv import parse_amount
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from playwright.sync_api import sync_playwright, Page, BrowserContext
 
@@ -42,7 +43,6 @@ def _login_max(page: Page) -> None:
 
     page.goto("https://www.max.co.il/login", wait_until="networkidle")
     page.wait_for_timeout(1000)
-    # Click "login with password" button if it exists
     try:
         page.get_by_text("כניסה עם סיסמה").click()
     except Exception:
@@ -52,7 +52,6 @@ def _login_max(page: Page) -> None:
     page.fill("#password", max_password or "")
     page.keyboard.press("Enter")
 
-    # Optional ID field
     try:
         page.wait_for_selector("#idInput input", timeout=3000)
         if user_id:
@@ -79,6 +78,7 @@ def _go_to_max_transaction_details(page: Page, year: str, month: str) -> None:
         + "-01_0_0_-1&sort=1a_1a_1a_1a_1a_1a"
     )
     page.goto(url, wait_until="networkidle")
+    page.wait_for_timeout(2000)
 
 
 def _download_max_excel(page: Page, year: str, month: str) -> Optional[Path]:
@@ -97,28 +97,266 @@ def _download_max_excel(page: Page, year: str, month: str) -> Optional[Path]:
     return target_file
 
 
-def _capture_foreign_exchange_table(page: Page, *, foreign_html_path: Path, immediate_html_path: Path) -> None:
+FOREIGN_TABLE_LABEL = 'עסקאות חו"ל ומט"ח'
+IMMEDIATE_TABLE_LABEL = "עסקאות בחיוב מיידי"
+
+
+def _label_variants(table_label: str) -> tuple[str, ...]:
+    """Quote variants Max may use in section headings."""
+    variants = {table_label}
+    if '"' in table_label:
+        variants.add(table_label.replace('"', "'"))
+        variants.add(table_label.replace('"', "״"))
+    return tuple(variants)
+
+
+def _scroll_transaction_details_page(page: Page) -> None:
+    """Scroll the full page so lazy-loaded Max sections can render."""
     try:
-        # locator = page.locator(
-        #     "css=app-table.ng-star-inserted:nth-child(6) > div:nth-child(1)"
-        # )
-        locator = page.locator("app-table").filter(has_text='עסקאות חו"ל ומט"ח')
-        locator.wait_for(timeout=10000)
+        page.evaluate(
+            """async () => {
+                const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+                const step = Math.max(280, Math.floor(window.innerHeight * 0.75));
+                const maxY = Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight
+                );
+                window.scrollTo(0, 0);
+                await delay(350);
+                for (let y = 0; y <= maxY; y += step) {
+                    window.scrollTo(0, y);
+                    await delay(280);
+                }
+                window.scrollTo(0, maxY);
+                await delay(450);
+                window.scrollTo(0, 0);
+                await delay(250);
+            }"""
+        )
+    except Exception:
+        for _ in range(10):
+            page.mouse.wheel(0, 900)
+            page.wait_for_timeout(350)
+    page.wait_for_timeout(600)
+
+
+def _section_label_on_page(page: Page, table_label: str) -> bool:
+    for variant in _label_variants(table_label):
+        try:
+            if page.get_by_text(variant, exact=False).count() > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _table_locator_for_label(page: Page, table_label: str):
+    locator = page.locator("app-table").filter(has_text=table_label)
+    if locator.count() > 0:
+        return locator
+    for variant in _label_variants(table_label):
+        if variant == table_label:
+            continue
+        alt = page.locator("app-table").filter(has_text=variant)
+        if alt.count() > 0:
+            return alt
+    return locator
+
+
+def _is_table_section_absent(
+    page: Page,
+    table_label: str,
+    *,
+    page_pre_scrolled: bool = False,
+) -> bool:
+    """
+    Return True only when the section heading is not on the page after a full scroll.
+    """
+    if not page_pre_scrolled:
+        _scroll_transaction_details_page(page)
+    if not _section_label_on_page(page, table_label):
+        return True
+
+    locator = _table_locator_for_label(page, table_label)
+    if locator.count() == 0:
+        return True
+
+    try:
+        locator.first.wait_for(state="visible", timeout=4000)
+        return False
+    except Exception:
+        return True
+
+
+def _scroll_table_into_view(page: Page, locator) -> None:
+    try:
+        locator.first.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        pass
+    try:
+        page.evaluate(
+            """(el) => {
+                let node = el;
+                while (node) {
+                    if (node.scrollHeight > node.clientHeight + 20) {
+                        node.scrollTop = node.scrollHeight;
+                    }
+                    node = node.parentElement;
+                }
+            }""",
+            locator.first.element_handle(),
+        )
+    except Exception:
+        pass
+    page.wait_for_timeout(1500)
+
+
+def _expand_table_rows(page: Page, locator) -> int:
+    """Scroll and click 'show more' until row count stabilizes."""
+    _scroll_table_into_view(page, locator)
+    previous_count = -1
+    stable_rounds = 0
+    for _ in range(12):
+        try:
+            row_count = locator.locator("div.row.body, motion.div.row.body").count()
+        except Exception:
+            row_count = 0
+
+        if row_count == previous_count:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+        previous_count = row_count
+        if stable_rounds >= 2:
+            break
+
+        clicked_more = False
+        for label in ("הצג עוד", "טען עוד", "עוד", "Show more"):
+            try:
+                more_button = locator.get_by_text(label, exact=False)
+                if more_button.count() > 0 and more_button.first.is_visible():
+                    more_button.first.click()
+                    clicked_more = True
+                    page.wait_for_timeout(1200)
+                    break
+            except Exception:
+                continue
+
+        if not clicked_more:
+            try:
+                page.evaluate(
+                    """(el) => {
+                        let node = el;
+                        while (node) {
+                            if (node.scrollHeight > node.clientHeight + 20) {
+                                node.scrollTop += Math.max(200, node.clientHeight * 0.8);
+                            }
+                            node = node.parentElement;
+                        }
+                    }""",
+                    locator.first.element_handle(),
+                )
+            except Exception:
+                pass
+            page.wait_for_timeout(800)
+
+    try:
+        return locator.locator("motion.div.row.body, div.row.body").count()
+    except Exception:
+        return 0
+
+
+def _capture_table_html(
+    page: Page,
+    *,
+    table_label: str,
+    html_path: Path,
+    csv_path: Path,
+    page_pre_scrolled: bool = False,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "label": table_label,
+        "html_path": str(html_path),
+        "csv_path": str(csv_path),
+        "captured": False,
+        "absent": False,
+        "row_count": 0,
+        "parsed_count": 0,
+        "error": None,
+    }
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if _is_table_section_absent(
+        page, table_label, page_pre_scrolled=page_pre_scrolled
+    ):
+        result["absent"] = True
+        write_empty_transactions_csv(str(csv_path))
+        print(f"{table_label}: section not on Max page for this month; skipping.")
+        return result
+
+    try:
+        locator = _table_locator_for_label(page, table_label)
+        locator.first.wait_for(state="visible", timeout=20000)
+        _scroll_table_into_view(page, locator)
+        row_count = _expand_table_rows(page, locator)
         html = locator.first.inner_html()
-        page.wait_for_timeout(10000)
-        foreign_html_path.parent.mkdir(parents=True, exist_ok=True)
-        foreign_html_path.write_text(html, encoding="utf-8")
-        print(f"Deal table HTML saved to {foreign_html_path}")
-        # added immediate transactions table
-        locator = page.locator("app-table").filter(has_text="עסקאות בחיוב מיידי")
-        locator.wait_for(timeout=10000)
-        html = locator.first.inner_html()
-        page.wait_for_timeout(10000)
-        immediate_html_path.parent.mkdir(parents=True, exist_ok=True)
-        immediate_html_path.write_text(html, encoding="utf-8")
-        print(f"Immediate transactions HTML saved to {immediate_html_path}")
-    except Exception as e:
-        print("Error capturing table:", e)
+        html_path.write_text(html, encoding="utf-8")
+        result["captured"] = True
+        result["row_count"] = row_count
+        print(f"{table_label}: captured {row_count} visible row(s) -> {html_path}")
+    except Exception as error:
+        if _is_table_section_absent(page, table_label):
+            result["absent"] = True
+            write_empty_transactions_csv(str(csv_path))
+            print(f"{table_label}: section not on Max page for this month; skipping.")
+            return result
+        result["error"] = str(error)
+        print(f"Error capturing {table_label}: {error}")
+    return result
+
+
+def _capture_foreign_exchange_table(
+    page: Page,
+    *,
+    foreign_html_path: Path,
+    immediate_html_path: Path,
+    foreign_csv_path: Path,
+    immediate_csv_path: Path,
+) -> dict[str, Any]:
+    _scroll_transaction_details_page(page)
+    foreign_result = _capture_table_html(
+        page,
+        table_label=FOREIGN_TABLE_LABEL,
+        html_path=foreign_html_path,
+        csv_path=foreign_csv_path,
+        page_pre_scrolled=True,
+    )
+    immediate_result = _capture_table_html(
+        page,
+        table_label=IMMEDIATE_TABLE_LABEL,
+        html_path=immediate_html_path,
+        csv_path=immediate_csv_path,
+        page_pre_scrolled=True,
+    )
+    return {
+        "foreign": foreign_result,
+        "immediate": immediate_result,
+    }
+
+
+def _parse_captured_table_html(
+    capture_result: dict[str, Any],
+    *,
+    html_path: Path,
+    csv_path: Path,
+    parse_html,
+) -> int:
+    if capture_result.get("absent"):
+        return int(capture_result.get("parsed_count") or 0)
+    if not capture_result.get("captured") or not html_path.exists():
+        write_empty_transactions_csv(str(csv_path))
+        return 0
+    return parse_html(str(html_path), str(csv_path))
 
 
 def getExcelFile(year, month):
@@ -126,6 +364,8 @@ def getExcelFile(year, month):
     print(f"date = {year}-{month}")
 
     paths = get_paths()
+    month_dir = paths.data_dir / f"{year}_{month}"
+    month_dir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -135,15 +375,21 @@ def getExcelFile(year, month):
         _login_max(page)
         _go_to_max_transaction_details(page, year, month)
         excel_path = _download_max_excel(page, year, month)
-        foreign_html_path = paths.data_dir / "foreign_exchange_transactions.html"
-        immediate_html_path = paths.data_dir / "immediate_transactions.html"
-        _capture_foreign_exchange_table(
+        foreign_html_path = month_dir / "foreign_exchange_transactions.html"
+        immediate_html_path = month_dir / "immediate_transactions.html"
+        foreign_exchange_transactions_csv_path = (
+            month_dir / "foreign_exchange_transactions.csv"
+        )
+        immediate_transactions_csv_path = month_dir / "immediate_transactions.csv"
+        capture_report = _capture_foreign_exchange_table(
             page,
             foreign_html_path=foreign_html_path,
             immediate_html_path=immediate_html_path,
+            foreign_csv_path=foreign_exchange_transactions_csv_path,
+            immediate_csv_path=immediate_transactions_csv_path,
         )
 
-        time.sleep(5)
+        time.sleep(2)
 
         context.close()
         browser.close()
@@ -151,23 +397,26 @@ def getExcelFile(year, month):
     if excel_path is None:
         raise RuntimeError("Failed to download Max Excel file")
 
-    combined_transactions_csv_path = paths.data_dir / "transactions.csv"
+    combined_transactions_csv_path = month_dir / "transactions.csv"
     foreign_exchange_transactions_csv_path = (
-        paths.data_dir / "foreign_exchange_transactions.csv"
+        month_dir / "foreign_exchange_transactions.csv"
     )
-    immediate_transactions_csv_path = paths.data_dir / "immediate_transactions.csv"
+    immediate_transactions_csv_path = month_dir / "immediate_transactions.csv"
 
-    # `get_foreign_exchange_transactions` and `get_immediate_transactions` each write a CSV.
-    # If they target the same file, the second call overwrites the first.
-    # Write them separately, then concatenate into a single `transactions.csv`.
-    get_foreign_exchange_transactions(
-        str(foreign_html_path),
-        str(foreign_exchange_transactions_csv_path),
+    foreign_count = _parse_captured_table_html(
+        capture_report["foreign"],
+        html_path=foreign_html_path,
+        csv_path=foreign_exchange_transactions_csv_path,
+        parse_html=get_foreign_exchange_transactions,
     )
-    get_immediate_transactions(
-        str(immediate_html_path),
-        str(immediate_transactions_csv_path),
+    immediate_count = _parse_captured_table_html(
+        capture_report["immediate"],
+        html_path=immediate_html_path,
+        csv_path=immediate_transactions_csv_path,
+        parse_html=get_immediate_transactions,
     )
+    capture_report["foreign"]["parsed_count"] = foreign_count
+    capture_report["immediate"]["parsed_count"] = immediate_count
 
     foreign_exchange_transactions_dataframe = pd.read_csv(
         foreign_exchange_transactions_csv_path,
@@ -190,9 +439,18 @@ def getExcelFile(year, month):
         encoding="utf-8-sig",
     )
 
-    parse_amount(str(combined_transactions_csv_path), str(excel_path))
+    appended_rows = parse_amount(
+        str(combined_transactions_csv_path),
+        str(excel_path),
+    )
 
-    # Remember last downloaded month in state for convenience
-    update_state({"last_filled_year": year, "last_filled_month": month})
+    capture_report["appended_rows"] = appended_rows
+    update_state(
+        {
+            "last_filled_year": year,
+            "last_filled_month": month,
+            "last_max_capture": capture_report,
+        }
+    )
 
     return str(excel_path)

@@ -1,10 +1,17 @@
 from datetime import datetime
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 import traceback
 
-from playwright.sync_api import sync_playwright, Page, BrowserContext
+from playwright.sync_api import (
+    TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
+    Page,
+    BrowserContext,
+    Locator,
+)
 
 from config import get_paths, load_env, validate_env, update_state
 from utils import checkDate
@@ -18,7 +25,6 @@ def _dismiss_intercepting_overlays(page: Page) -> None:
             () => {
                 const selectors = [
                     '.app-cookies-overlay',
-                    '.cdk-overlay-backdrop',
                     '.modal-backdrop',
                     '.block-ui-wrapper',
                     '.loading-overlay',
@@ -60,21 +66,95 @@ def _ensure_clickable(page: Page, button_label: str, timeout_ms: int = 15000) ->
         raise RuntimeError(f'Export button "{button_label}" is blocked by: {blocker}')
 
 
+def _export_modal(page: Page) -> Locator:
+    return page.locator("ngb-modal-window").filter(has=page.locator("app-exporttol-modal"))
+
+
+def _export_modal_is_open(page: Page) -> bool:
+    try:
+        return page.locator("ngb-modal-window app-exporttol-modal").is_visible()
+    except Exception:
+        return False
+
+
+def _export_continue_button(page: Page, continue_text: str = "המשך") -> Locator:
+    """Continue button in the Excel export modal (primary footer button)."""
+    footer = _export_modal(page).locator(".modal-footer")
+    return footer.locator("button.btn-primary").or_(
+        footer.get_by_text(continue_text, exact=True)
+    ).first
+
+
+def _save_export_from_iframe(page: Page, timeout_ms: int) -> str:
+    page.wait_for_function(
+        """
+        () => {
+            const iframe = document.getElementById('frmExportData');
+            if (!iframe || !iframe.contentDocument) return false;
+            return !!iframe.contentDocument.querySelector('table.xlTable');
+        }
+        """,
+        timeout=timeout_ms,
+    )
+    return page.frame_locator("#frmExportData").locator("html").inner_html()
+
+
+def _open_export_modal(page: Page, export_button: Locator) -> None:
+    if _export_modal_is_open(page):
+        return
+    export_button.click(timeout=15000)
+
+
+def _confirm_export_modal(page: Page, continue_text: str = "המשך") -> None:
+    _export_modal(page).wait_for(state="visible", timeout=15000)
+    continue_button = _export_continue_button(page, continue_text=continue_text)
+    continue_button.wait_for(state="visible", timeout=15000)
+    continue_button.click(timeout=15000)
+    page.wait_for_timeout(1500)
+
+
+def _click_export_and_continue(page: Page, export_button: Locator) -> None:
+    _open_export_modal(page, export_button)
+    _confirm_export_modal(page)
+
+
 def _download_from_export_dialog(
     page: Page,
     button_label: str,
     continue_text: str = "המשך",
-    timeout_ms: int = 60000,
+    timeout_ms: int = 90000,
 ) -> Path:
     _ensure_clickable(page, button_label=button_label, timeout_ms=15000)
     export_button = page.get_by_title(button_label, exact=True).first
-    continue_button = page.get_by_text(continue_text, exact=True).first
-    with page.expect_download(timeout=timeout_ms) as download_info:
-        export_button.click(timeout=15000)
-        continue_button.wait_for(state="visible", timeout=15000)
-        continue_button.click(timeout=15000)
-    download = download_info.value
-    return Path(download.path())
+
+    download_timeout_ms = min(timeout_ms, 45000)
+    try:
+        with page.expect_download(timeout=download_timeout_ms) as download_info:
+            _click_export_and_continue(page, export_button)
+        return Path(download_info.value.path())
+    except PlaywrightTimeoutError:
+        # Export may already be confirmed; Leumi often loads HTML into #frmExportData only.
+        iframe_timeout_ms = min(timeout_ms, 30000)
+        try:
+            return _write_iframe_export(page, timeout_ms=iframe_timeout_ms)
+        except PlaywrightTimeoutError:
+            if _export_modal_is_open(page):
+                _confirm_export_modal(page, continue_text=continue_text)
+            else:
+                _click_export_and_continue(page, export_button)
+            return _write_iframe_export(page, timeout_ms=timeout_ms)
+
+
+def _write_iframe_export(page: Page, timeout_ms: int) -> Path:
+    html = _save_export_from_iframe(page, timeout_ms=timeout_ms)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".xls", delete=False, encoding="utf-8"
+    ) as tmp:
+        if html.lstrip().lower().startswith("<!doctype"):
+            tmp.write(html)
+        else:
+            tmp.write(f"<!DOCTYPE html><html>{html}</html>")
+        return Path(tmp.name)
 
 
 def _debug_enabled() -> bool:
@@ -249,8 +329,7 @@ def getLeumiData(year: str, month: str) -> Optional[Tuple[Path, Path]]:
     year, month = checkDate(year, month)
 
     with sync_playwright() as p:
-        # debug = _debug_enabled()
-        debug = True
+        debug = _debug_enabled()
         paths = get_paths()
         debug_dir = paths.data_dir / "leumi_debug"
         debug_dir.mkdir(parents=True, exist_ok=True)

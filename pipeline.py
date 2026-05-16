@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 import traceback
 
-from config import get_paths, update_state, load_env, validate_env
+from config import get_paths, get_state, update_state, load_env, validate_env
 from getExcelFileFromMax import getExcelFile
 from getExcelFileFromLeumi import getLeumiData
 from handleExcel import getExpenses, fillCells
@@ -21,7 +21,7 @@ def prepare_for_month(
     month: str,
     include_leumi: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
-) -> Tuple[Path, Path, str]:
+) -> Tuple[Path, Path, str, Dict[str, Any], list[str]]:
     """
     End-to-end pipeline for a given year/month:
     - Download Max Excel (and optionally Leumi when include_leumi=True)
@@ -72,7 +72,7 @@ def prepare_for_month(
     try:
         _emit_progress(progress_callback, "Step 3/5: Categorizing expenses with AI...")
         print("[pipeline] Step 3: getExpenses (read + AI categorize)")
-        sorted_expenses = getExpenses(str(source_excel_path))
+        sorted_expenses, source_expenses_dict = getExpenses(str(source_excel_path))
     except Exception as e:
         raise RuntimeError(f"Pipeline failed at step 3 (getExpenses/categorize): {e}") from e
 
@@ -88,7 +88,43 @@ def prepare_for_month(
             )
         output_workbook_path.write_bytes(paths.template_expenses.read_bytes())
 
-    return source_excel_path, output_workbook_path, sorted_expenses
+    capture_warnings: list[str] = []
+    state = get_state()
+    capture_report = state.get("last_max_capture")
+    if isinstance(capture_report, dict):
+        immediate = capture_report.get("immediate") or {}
+        foreign = capture_report.get("foreign") or {}
+        immediate_parsed = int(immediate.get("parsed_count") or 0)
+        immediate_visible = int(immediate.get("row_count") or 0)
+        if immediate.get("error"):
+            capture_warnings.append(
+                "Could not scrape immediate-charge table from Max: "
+                + str(immediate.get("error"))
+            )
+        elif not immediate.get("absent"):
+            if immediate_visible > 0 and immediate_parsed < immediate_visible:
+                capture_warnings.append(
+                    f"Only {immediate_parsed} of {immediate_visible} visible immediate "
+                    "transaction(s) were parsed. Some may be missing."
+                )
+            elif immediate_visible == 0 and immediate_parsed == 0:
+                capture_warnings.append(
+                    "No immediate-charge transactions were found on the Max page "
+                    "for this month."
+                )
+        if foreign.get("error"):
+            capture_warnings.append(
+                "Could not scrape foreign-exchange table from Max: "
+                + str(foreign.get("error"))
+            )
+
+    return (
+        source_excel_path,
+        output_workbook_path,
+        sorted_expenses,
+        source_expenses_dict,
+        capture_warnings,
+    )
 
 
 def finalize_for_month(
@@ -121,7 +157,7 @@ def run_for_month(
     include_leumi: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Path, Path]:
-    source_excel_path, output_workbook_path, sorted_expenses = prepare_for_month(
+    source_excel_path, output_workbook_path, sorted_expenses, _, _ = prepare_for_month(
         year=year,
         month=month,
         include_leumi=include_leumi,

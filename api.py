@@ -12,15 +12,24 @@ from fastapi.responses import FileResponse
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import get_paths, get_state, load_env, update_state
+from config import (
+    TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES,
+    TEMPLATE_INCOME_CATEGORY_ROW_RANGES,
+    TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES,
+    get_paths,
+    get_state,
+    load_env,
+    update_state,
+)
 from pipeline import run_for_month, prepare_for_month, finalize_for_month
 from data import monthToExpenseColDict
 from openpyxl import load_workbook
 from handleExcel import (
     parse_ai_output_lines,
     get_allowed_categories,
+    get_allowed_category_groups,
     build_ai_output_from_items,
-    is_card_statement_duplicate_expense,
+    build_review_items,
 )
 from google_drive_service import (
     create_oauth_start_url,
@@ -164,7 +173,7 @@ def run_month_prepare(payload: Dict[str, Any]) -> Dict[str, Any]:
     _update_progress("Starting monthly run...")
 
     try:
-        src, out, ai_output = prepare_for_month(
+        src, out, ai_output, source_expenses_dict, capture_warnings = prepare_for_month(
             year=year,
             month=month,
             include_leumi=include_leumi,
@@ -182,19 +191,18 @@ def run_month_prepare(payload: Dict[str, Any]) -> Dict[str, Any]:
         ) from error
 
     parsed_items, parse_errors = parse_ai_output_lines(ai_output)
-    allowed_categories = get_allowed_categories(str(out))
-    review_items = []
-    for item in parsed_items:
-        review_items.append(
-            {
-                "name": item.get("name", ""),
-                "cost": float(item.get("cost", 0.0)),
-                "category": str(item.get("category", "")),
-                "is_possible_duplicate": bool(
-                    is_card_statement_duplicate_expense(str(item.get("name", "")))
-                ),
-            }
-        )
+    allowed_category_groups = get_allowed_category_groups(str(out))
+    allowed_categories = [
+        category
+        for group in allowed_category_groups
+        for category in group["categories"]
+    ]
+    review_items, review_warnings = build_review_items(
+        parsed_items,
+        parse_errors,
+        expenses_dict=source_expenses_dict,
+    )
+    warnings = [*capture_warnings, *review_warnings]
 
     review_token = str(uuid4())
     _PENDING_REVIEWS[review_token] = {
@@ -209,8 +217,10 @@ def run_month_prepare(payload: Dict[str, Any]) -> Dict[str, Any]:
         "source_excel": str(src),
         "output_excel": str(out),
         "allowed_categories": allowed_categories,
+        "category_groups": allowed_category_groups,
         "items": review_items,
         "parse_errors": parse_errors,
+        "warnings": warnings,
     }
 
 
@@ -383,10 +393,7 @@ def expenses_summary(year: int, month: int) -> Dict[str, float]:
     return _summarize_sheet_row_ranges(
         year=year,
         month=month,
-        row_ranges=[
-            (17, 45),  # Rows 17-44
-            (49, 91),  # Rows 49-90
-        ],
+        row_ranges=list(TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES),
     )
 
 
@@ -396,9 +403,7 @@ def income_summary(year: int, month: int) -> Dict[str, float]:
     return _summarize_sheet_row_ranges(
         year=year,
         month=month,
-        row_ranges=[
-            (6, 13),  # Rows 6-12
-        ],
+        row_ranges=list(TEMPLATE_INCOME_CATEGORY_ROW_RANGES),
     )
 
 
@@ -408,9 +413,7 @@ def investments_summary(year: int, month: int) -> Dict[str, float]:
     return _summarize_sheet_row_ranges(
         year=year,
         month=month,
-        row_ranges=[
-            (95, 105),  # Rows 95-104
-        ],
+        row_ranges=list(TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES),
     )
 
 
@@ -571,21 +574,21 @@ def _monthly_totals(year: int, month: int) -> Dict[str, float]:
         _summarize_sheet_row_ranges(
             year=year,
             month=month,
-            row_ranges=[(17, 45), (49, 91)],
+            row_ranges=list(TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES),
         ).values()
     )
     income = sum(
         _summarize_sheet_row_ranges(
             year=year,
             month=month,
-            row_ranges=[(6, 13)],
+            row_ranges=list(TEMPLATE_INCOME_CATEGORY_ROW_RANGES),
         ).values()
     )
     investments = sum(
         _summarize_sheet_row_ranges(
             year=year,
             month=month,
-            row_ranges=[(95, 105)],
+            row_ranges=list(TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES),
         ).values()
     )
     return {

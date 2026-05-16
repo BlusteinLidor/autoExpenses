@@ -1,16 +1,51 @@
 "use client";
 
+import { CategorySelectItems } from "@/components/review/CategorySelectItems";
 import { SplitEditor, SplitPart } from "@/components/review/SplitEditor";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FinalizeRunItem, ReviewItem } from "@/lib/api/types";
-import { isSplitExpenseName, money } from "@/lib/format";
+import { CategoryGroup, FinalizeRunItem, ReviewItem } from "@/lib/api/types";
+import { expenseCategories, incomeCategories, isSplitExpenseName } from "@/lib/format";
 import { useMemo, useState } from "react";
+
+const DEFAULT_INCOME_CATEGORY = "הכנסה אחרת / חד פעמית";
+
+function categoriesForItem(
+  item: ReviewItem,
+  categories: string[],
+  categoryGroups?: CategoryGroup[],
+) {
+  if (!item.is_income) {
+    return expenseCategories(categories, categoryGroups);
+  }
+  const incomeOnly = incomeCategories(categoryGroups);
+  return incomeOnly.length > 0 ? incomeOnly : categories;
+}
+
+function defaultCategoryForItem(
+  item: ReviewItem,
+  categories: string[],
+  categoryGroups?: CategoryGroup[],
+) {
+  const allowed = categoriesForItem(item, categories, categoryGroups);
+  if (item.category && allowed.includes(item.category)) {
+    return item.category;
+  }
+  if (item.is_income) {
+    return allowed.includes(DEFAULT_INCOME_CATEGORY)
+      ? DEFAULT_INCOME_CATEGORY
+      : allowed[0] || "";
+  }
+  return item.needs_manual_review ? "" : allowed[0] || "";
+}
 
 type RowState = {
   include: boolean;
+  cost: number;
   category: string;
   splitParts: SplitPart[];
 };
@@ -18,25 +53,45 @@ type RowState = {
 type ReviewTableProps = {
   items: ReviewItem[];
   categories: string[];
+  categoryGroups?: CategoryGroup[];
+  warnings?: string[];
   onApply: (items: FinalizeRunItem[]) => Promise<void>;
   onCancel: () => void;
   busy: boolean;
 };
 
-export function ReviewTable({ items, categories, onApply, onCancel, busy }: ReviewTableProps) {
+export function ReviewTable({
+  items,
+  categories,
+  categoryGroups,
+  warnings = [],
+  onApply,
+  onCancel,
+  busy,
+}: ReviewTableProps) {
   const [rows, setRows] = useState<RowState[]>(
-    items.map((item) => ({
-      include: !item.is_possible_duplicate,
-      category: item.category || categories[0] || "",
-      splitParts: [
-        { amount: Math.abs(Number(item.cost || 0)), category: item.category || categories[0] || "" },
-        { amount: 0, category: item.category || categories[0] || "" },
-      ],
-    })),
+    items.map((item) => {
+      const defaultCategory = defaultCategoryForItem(item, categories, categoryGroups);
+      return {
+        include: item.needs_manual_review ? true : !item.is_possible_duplicate,
+        cost: Math.abs(Number(item.cost || 0)),
+        category: defaultCategory,
+        splitParts: [
+          { amount: Math.abs(Number(item.cost || 0)), category: defaultCategory },
+          { amount: 0, category: defaultCategory },
+        ],
+      };
+    }),
   );
   const [error, setError] = useState("");
 
   const hasSplitRows = useMemo(() => items.some((item) => isSplitExpenseName(item.name)), [items]);
+  const manualReviewCount = useMemo(
+    () => items.filter((item) => item.needs_manual_review).length,
+    [items],
+  );
+  const incomeCount = useMemo(() => items.filter((item) => item.is_income).length, [items]);
+  const expenseCount = items.length - incomeCount;
 
   const buildFinalizeItems = () => {
     const finalizeItems: FinalizeRunItem[] = [];
@@ -44,6 +99,9 @@ export function ReviewTable({ items, categories, onApply, onCancel, busy }: Revi
       const source = items[idx];
       const row = rows[idx];
       if (!row?.include) continue;
+      if (source.needs_manual_review && !row.category) {
+        throw new Error(`Choose a category for '${source.name}' before applying.`);
+      }
       if (isSplitExpenseName(source.name)) {
         let total = 0;
         let partNo = 1;
@@ -61,13 +119,18 @@ export function ReviewTable({ items, categories, onApply, onCancel, busy }: Revi
           total += amount;
           partNo += 1;
         }
-        if (Math.abs(total - Math.abs(Number(source.cost || 0))) > 0.01) {
-          throw new Error(`Split total for '${source.name}' must equal the original amount.`);
+        const expectedTotal = Math.abs(Number(row.cost || 0));
+        if (Math.abs(total - expectedTotal) > 0.01) {
+          throw new Error(`Split total for '${source.name}' must equal ${expectedTotal}.`);
         }
       } else {
+        const cost = Math.abs(Number(row.cost || 0));
+        if (cost <= 0) {
+          throw new Error(`Amount for '${source.name}' must be greater than zero.`);
+        }
         finalizeItems.push({
           name: source.name,
-          cost: Math.abs(Number(source.cost || 0)),
+          cost,
           category: row.category,
         });
       }
@@ -79,18 +142,43 @@ export function ReviewTable({ items, categories, onApply, onCancel, busy }: Revi
     <div className="space-y-4 rounded-xl border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold">Review Categories</h2>
-          <p className="text-sm text-muted-foreground">{items.length} items ready for review.</p>
+          <h2 className="text-lg font-semibold">Review Transactions</h2>
+          <p className="text-sm text-muted-foreground">
+            Edit amounts and categories before applying. {expenseCount} expenses
+            {incomeCount > 0 ? `, ${incomeCount} income` : ""} ready for review.
+          </p>
         </div>
-        {hasSplitRows ? <Badge variant="secondary">Split flow enabled</Badge> : null}
+        <div className="flex flex-wrap gap-2">
+          {incomeCount > 0 ? (
+            <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-200">
+              {incomeCount} income
+            </Badge>
+          ) : null}
+          {manualReviewCount > 0 ? (
+            <Badge variant="destructive">{manualReviewCount} need manual review</Badge>
+          ) : null}
+          {hasSplitRows ? <Badge variant="secondary">Split flow enabled</Badge> : null}
+        </div>
       </div>
+      {warnings.length > 0 ? (
+        <Alert>
+          <AlertTitle>Attention needed</AlertTitle>
+          <AlertDescription>
+            <ul className="list-disc space-y-1 pl-5">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <div className="overflow-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Expense</TableHead>
+              <TableHead>Transaction</TableHead>
               <TableHead>Amount</TableHead>
               <TableHead>Category / Split</TableHead>
               <TableHead>Include</TableHead>
@@ -99,19 +187,58 @@ export function ReviewTable({ items, categories, onApply, onCancel, busy }: Revi
           <TableBody>
             {items.map((item, idx) => {
               const row = rows[idx];
+              const rowCategories = categoriesForItem(item, categories, categoryGroups);
+              const incomeRowClass = item.is_income
+                ? "border-l-2 border-l-emerald-500/70 bg-emerald-500/5"
+                : "";
+              const manualReviewClass = item.needs_manual_review ? "bg-destructive/5" : "";
               return (
-                <TableRow key={`${item.name}-${idx}`}>
+                <TableRow
+                  key={`${item.name}-${idx}`}
+                  className={[incomeRowClass, manualReviewClass].filter(Boolean).join(" ") || undefined}
+                >
                   <TableCell>
                     <div className="space-y-1">
-                      <p>{item.name}</p>
+                      <p className={item.is_income ? "font-medium text-emerald-200" : undefined}>
+                        {item.name}
+                      </p>
+                      {item.is_income ? (
+                        <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-200">
+                          Income
+                        </Badge>
+                      ) : null}
+                      {item.needs_manual_review ? (
+                        <Badge variant="destructive">Needs categorization</Badge>
+                      ) : null}
                       {item.is_possible_duplicate ? <Badge variant="outline">Possible duplicate</Badge> : null}
+                      {item.error_reason ? (
+                        <p className="text-xs text-muted-foreground">{item.error_reason}</p>
+                      ) : null}
                     </div>
                   </TableCell>
-                  <TableCell>{money(item.cost)}</TableCell>
-                  <TableCell className="min-w-[280px]">
+                  <TableCell className="w-[120px]">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className={item.is_income ? "border-emerald-500/40 focus-visible:border-emerald-500" : undefined}
+                      value={String(row.cost)}
+                      onChange={(event) => {
+                        const nextRows = [...rows];
+                        nextRows[idx] = { ...nextRows[idx], cost: Number(event.target.value) };
+                        setRows(nextRows);
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell className="min-w-[360px]">
                     {isSplitExpenseName(item.name) ? (
                       <SplitEditor
-                        categories={categories}
+                        categories={rowCategories}
+                        categoryGroups={
+                          item.is_income
+                            ? categoryGroups?.filter((group) => group.id === "income")
+                            : categoryGroups?.filter((group) => group.id !== "income")
+                        }
                         parts={row.splitParts}
                         onChange={(splitParts) => {
                           const nextRows = [...rows];
@@ -121,22 +248,35 @@ export function ReviewTable({ items, categories, onApply, onCancel, busy }: Revi
                       />
                     ) : (
                       <Select
-                        value={row.category}
+                        value={row.category || undefined}
                         onValueChange={(value) => {
                           const nextRows = [...rows];
                           nextRows[idx] = { ...nextRows[idx], category: value ?? "" };
                           setRows(nextRows);
                         }}
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Category" />
+                        <SelectTrigger
+                          className={[
+                            "h-auto w-full min-w-0 py-2 *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-normal",
+                            item.is_income ? "border-emerald-500/40" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
+                          <SelectValue placeholder={item.is_income ? "Income category" : "Category"} />
                         </SelectTrigger>
-                        <SelectContent>
-                          {categories.map((category) => (
-                            <SelectItem key={category} value={category}>
-                              {category}
-                            </SelectItem>
-                          ))}
+                        <SelectContent
+                          alignItemWithTrigger={false}
+                          className="w-max min-w-[var(--anchor-width)] max-w-[min(calc(100vw-2rem),32rem)]"
+                        >
+                          <CategorySelectItems
+                            categories={rowCategories}
+                            categoryGroups={
+                              item.is_income
+                                ? categoryGroups?.filter((group) => group.id === "income")
+                                : categoryGroups?.filter((group) => group.id !== "income")
+                            }
+                          />
                         </SelectContent>
                       </Select>
                     )}

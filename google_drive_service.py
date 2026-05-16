@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -47,6 +48,15 @@ def _write_state(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _invalidate_token(state: Dict[str, Any], *, error: str) -> None:
+    state["connected"] = False
+    state["email"] = None
+    state["token"] = None
+    state["last_error"] = error
+    state["updated_at"] = _now_iso()
+    _write_state(state)
+
+
 def _oauth_client_config() -> Dict[str, Any]:
     client_id = _env("GOOGLE_CLIENT_ID")
     client_secret = _env("GOOGLE_CLIENT_SECRET")
@@ -78,7 +88,18 @@ def _credentials_from_state(state: Dict[str, Any]) -> Optional[Credentials]:
         return None
 
     if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError:
+            _invalidate_token(
+                state,
+                error="Google Drive session expired. Please connect again.",
+            )
+            return None
+        except Exception as exc:
+            _invalidate_token(state, error=f"Google Drive token refresh failed: {exc}")
+            return None
+
         state["token"] = {
             "token": credentials.token,
             "refresh_token": credentials.refresh_token,
@@ -88,6 +109,7 @@ def _credentials_from_state(state: Dict[str, Any]) -> Optional[Credentials]:
             "scopes": credentials.scopes,
         }
         state["connected"] = True
+        state["last_error"] = None
         state["updated_at"] = _now_iso()
         _write_state(state)
     return credentials
@@ -96,6 +118,7 @@ def _credentials_from_state(state: Dict[str, Any]) -> Optional[Credentials]:
 def get_drive_status() -> Dict[str, Any]:
     state = _read_state()
     credentials = _credentials_from_state(state) if state else None
+    state = _read_state()
     connected = bool(credentials and credentials.valid)
     return {
         "configured": is_drive_configured(),

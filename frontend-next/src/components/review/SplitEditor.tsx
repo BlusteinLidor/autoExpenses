@@ -2,7 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CategorySelectItems } from "@/components/review/CategorySelectItems";
+import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CategoryGroup } from "@/lib/api/types";
 import { Plus, Trash2 } from "lucide-react";
 
 export type SplitPart = {
@@ -13,10 +15,11 @@ export type SplitPart = {
 type SplitEditorProps = {
   parts: SplitPart[];
   categories: string[];
+  categoryGroups?: CategoryGroup[];
   onChange: (parts: SplitPart[]) => void;
 };
 
-export function SplitEditor({ parts, categories, onChange }: SplitEditorProps) {
+export function SplitEditor({ parts, categories, categoryGroups, onChange }: SplitEditorProps) {
   return (
     <div className="space-y-2 rounded-md border p-2">
       {parts.map((part, idx) => (
@@ -39,15 +42,14 @@ export function SplitEditor({ parts, categories, onChange }: SplitEditorProps) {
               onChange(next);
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger className="h-auto w-full min-w-0 py-2 *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-normal">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent>
-              {categories.map((category) => (
-                <SelectItem key={category} value={category}>
-                  {category}
-                </SelectItem>
-              ))}
+            <SelectContent
+              alignItemWithTrigger={false}
+              className="w-max min-w-[var(--anchor-width)] max-w-[min(calc(100vw-2rem),32rem)]"
+            >
+              <CategorySelectItems categories={categories} categoryGroups={categoryGroups} />
             </SelectContent>
           </Select>
           <Button
