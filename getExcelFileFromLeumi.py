@@ -17,6 +17,95 @@ from config import get_paths, load_env, validate_env, update_state
 from utils import checkDate
 
 
+def _wait_for_credit_card_view(page: Page, timeout_ms: int = 60000) -> None:
+    page.wait_for_load_state("networkidle")
+    try:
+        page.locator("bll-loader ngx-spinner, ngx-spinner").first.wait_for(
+            state="hidden", timeout=timeout_ms
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+    hebrew_months = [
+        "ינואר",
+        "פברואר",
+        "מרץ",
+        "אפריל",
+        "מאי",
+        "יוני",
+        "יולי",
+        "אוגוסט",
+        "ספטמבר",
+        "אוקטובר",
+        "נובמבר",
+        "דצמבר",
+    ]
+    for month_name in hebrew_months:
+        month_button = page.locator("button").filter(has_text=month_name).first
+        try:
+            month_button.wait_for(state="visible", timeout=3000)
+            return
+        except PlaywrightTimeoutError:
+            continue
+
+    export_button = page.get_by_title("יצוא לאקסל", exact=True).first
+    export_button.wait_for(state="visible", timeout=timeout_ms)
+
+
+def _navigate_to_credit_card_export_view(page: Page) -> None:
+    page.locator("app-footer a[aria-label='דף הבית']").click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+
+    card_entry = page.locator(
+        "creditcard-directive a[data-lb-key='SHEMESHPREMIUM.creditCard.TEST.Link']"
+    ).first
+    title_entry = page.locator(
+        "creditcard-directive a[aria-label='כרטיסי אשראי']"
+    ).first
+
+    if card_entry.count() > 0:
+        card_entry.click(force=True, timeout=15000)
+    elif title_entry.count() > 0:
+        title_entry.click(force=True, timeout=15000)
+    else:
+        page.locator(
+            "app-footer a[aria-label='כרטיסי אשראי'][href*='CardsWorld']"
+        ).click()
+
+    _wait_for_credit_card_view(page)
+
+
+def _select_credit_card_month(
+    page: Page, month_in_hebrew: str, next_current_month_in_hebrew: str
+) -> None:
+    current_month_in_hebrew, _ = month_number_to_hebrew(datetime.now().month)
+    picker_labels = [
+        next_current_month_in_hebrew,
+        current_month_in_hebrew,
+        month_in_hebrew,
+    ]
+    clicked_label = None
+    for label in picker_labels:
+        candidate = page.locator("button").filter(has_text=label)
+        if candidate.count() > 0 and candidate.first.is_visible():
+            candidate.first.click()
+            clicked_label = label
+            break
+
+    if clicked_label is None:
+        raise PlaywrightTimeoutError(
+            f"No visible month picker button found for labels: {picker_labels}"
+        )
+
+    if clicked_label == month_in_hebrew:
+        return
+
+    month_option = page.locator("li").filter(has_text=month_in_hebrew).first
+    month_option.wait_for(state="visible", timeout=15000)
+    month_option.click()
+
+
 def _dismiss_intercepting_overlays(page: Page) -> None:
     # Remove common overlays/popups that can intercept export clicks.
     try:
@@ -285,10 +374,8 @@ def _export_transactions_for_month(
     temp_path = _download_from_export_dialog(page, button_label="יצוא לאקסל")
     temp_path.replace(target)
 
-    page.locator("app-nav-menu").get_by_text("דף הבית").click()
-    page.locator("#center_hpsummary").get_by_label("כרטיסי אשראי", exact=True).click()
-    page.locator("button").filter(has_text=next_current_month_in_hebrew).click()
-    page.locator("li").filter(has_text=month_in_hebrew).click()
+    _navigate_to_credit_card_export_view(page)
+    _select_credit_card_month(page, month_in_hebrew, next_current_month_in_hebrew)
     temp_path1 = _download_from_export_dialog(page, button_label="יצוא לאקסל")
     cards_target = paths.leumi_exports_dir / f"leumi_credit_cards_{year}_{month}.xls"
     temp_path1.replace(cards_target)

@@ -6,46 +6,48 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CategoryGroup, FinalizeRunItem, ReviewItem } from "@/lib/api/types";
-import { expenseCategories, incomeCategories, isSplitExpenseName } from "@/lib/format";
+import {
+  categoriesForTransactionKind,
+  categoryGroupsForTransactionKind,
+  defaultCategoryForTransactionKind,
+  inferTransactionKind,
+  isSplitExpenseName,
+  TransactionKind,
+} from "@/lib/format";
 import { useMemo, useState } from "react";
 
-const DEFAULT_INCOME_CATEGORY = "הכנסה אחרת / חד פעמית";
+const TRANSACTION_KIND_OPTIONS: { value: TransactionKind; label: string }[] = [
+  { value: "expense", label: "Expense" },
+  { value: "investment", label: "Investment" },
+  { value: "income", label: "Income" },
+];
 
-function categoriesForItem(
-  item: ReviewItem,
+function pickCategoryForKind(
+  kind: TransactionKind,
+  currentCategory: string,
   categories: string[],
   categoryGroups?: CategoryGroup[],
+  needsManualReview?: boolean,
 ) {
-  if (!item.is_income) {
-    return expenseCategories(categories, categoryGroups);
+  const allowed = categoriesForTransactionKind(kind, categories, categoryGroups);
+  if (currentCategory && allowed.includes(currentCategory)) {
+    return currentCategory;
   }
-  const incomeOnly = incomeCategories(categoryGroups);
-  return incomeOnly.length > 0 ? incomeOnly : categories;
-}
-
-function defaultCategoryForItem(
-  item: ReviewItem,
-  categories: string[],
-  categoryGroups?: CategoryGroup[],
-) {
-  const allowed = categoriesForItem(item, categories, categoryGroups);
-  if (item.category && allowed.includes(item.category)) {
-    return item.category;
-  }
-  if (item.is_income) {
-    return allowed.includes(DEFAULT_INCOME_CATEGORY)
-      ? DEFAULT_INCOME_CATEGORY
-      : allowed[0] || "";
-  }
-  return item.needs_manual_review ? "" : allowed[0] || "";
+  return defaultCategoryForTransactionKind(
+    kind,
+    { category: currentCategory, needs_manual_review: needsManualReview },
+    categories,
+    categoryGroups,
+  );
 }
 
 type RowState = {
   include: boolean;
   cost: number;
+  transactionKind: TransactionKind;
   category: string;
   splitParts: SplitPart[];
 };
@@ -71,10 +73,17 @@ export function ReviewTable({
 }: ReviewTableProps) {
   const [rows, setRows] = useState<RowState[]>(
     items.map((item) => {
-      const defaultCategory = defaultCategoryForItem(item, categories, categoryGroups);
+      const transactionKind = inferTransactionKind(item, categoryGroups);
+      const defaultCategory = defaultCategoryForTransactionKind(
+        transactionKind,
+        item,
+        categories,
+        categoryGroups,
+      );
       return {
         include: item.needs_manual_review ? true : !item.is_possible_duplicate,
         cost: Math.abs(Number(item.cost || 0)),
+        transactionKind,
         category: defaultCategory,
         splitParts: [
           { amount: Math.abs(Number(item.cost || 0)), category: defaultCategory },
@@ -90,8 +99,45 @@ export function ReviewTable({
     () => items.filter((item) => item.needs_manual_review).length,
     [items],
   );
-  const incomeCount = useMemo(() => items.filter((item) => item.is_income).length, [items]);
-  const expenseCount = items.length - incomeCount;
+  const kindCounts = useMemo(
+    () =>
+      rows.reduce(
+        (acc, row) => {
+          acc[row.transactionKind] += 1;
+          return acc;
+        },
+        { expense: 0, investment: 0, income: 0 } as Record<TransactionKind, number>,
+      ),
+    [rows],
+  );
+
+  const updateRow = (idx: number, patch: Partial<RowState>) => {
+    setRows((current) => {
+      const nextRows = [...current];
+      nextRows[idx] = { ...nextRows[idx], ...patch };
+      return nextRows;
+    });
+  };
+
+  const updateTransactionKind = (idx: number, kind: TransactionKind) => {
+    const source = items[idx];
+    const row = rows[idx];
+    const nextCategory = pickCategoryForKind(
+      kind,
+      row.category,
+      categories,
+      categoryGroups,
+      source.needs_manual_review,
+    );
+    updateRow(idx, {
+      transactionKind: kind,
+      category: nextCategory,
+      splitParts: row.splitParts.map((part) => ({
+        ...part,
+        category: pickCategoryForKind(kind, part.category, categories, categoryGroups),
+      })),
+    });
+  };
 
   const buildFinalizeItems = () => {
     const finalizeItems: FinalizeRunItem[] = [];
@@ -144,14 +190,21 @@ export function ReviewTable({
         <div>
           <h2 className="text-lg font-semibold">Review Transactions</h2>
           <p className="text-sm text-muted-foreground">
-            Edit amounts and categories before applying. {expenseCount} expenses
-            {incomeCount > 0 ? `, ${incomeCount} income` : ""} ready for review.
+            Edit amounts, transaction type, and categories before applying. {kindCounts.expense}{" "}
+            expenses
+            {kindCounts.investment > 0 ? `, ${kindCounts.investment} investments` : ""}
+            {kindCounts.income > 0 ? `, ${kindCounts.income} income` : ""} in this review.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {incomeCount > 0 ? (
+          {kindCounts.income > 0 ? (
             <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-200">
-              {incomeCount} income
+              {kindCounts.income} income
+            </Badge>
+          ) : null}
+          {kindCounts.investment > 0 ? (
+            <Badge className="border-indigo-500/40 bg-indigo-500/15 text-indigo-200">
+              {kindCounts.investment} investments
             </Badge>
           ) : null}
           {manualReviewCount > 0 ? (
@@ -180,6 +233,7 @@ export function ReviewTable({
             <TableRow>
               <TableHead>Transaction</TableHead>
               <TableHead>Amount</TableHead>
+              <TableHead>Type</TableHead>
               <TableHead>Category / Split</TableHead>
               <TableHead>Include</TableHead>
             </TableRow>
@@ -187,26 +241,40 @@ export function ReviewTable({
           <TableBody>
             {items.map((item, idx) => {
               const row = rows[idx];
-              const rowCategories = categoriesForItem(item, categories, categoryGroups);
-              const incomeRowClass = item.is_income
-                ? "border-l-2 border-l-emerald-500/70 bg-emerald-500/5"
-                : "";
+              const rowCategories = categoriesForTransactionKind(
+                row.transactionKind,
+                categories,
+                categoryGroups,
+              );
+              const rowCategoryGroups = categoryGroupsForTransactionKind(
+                row.transactionKind,
+                categoryGroups,
+              );
+              const rowAccentClass =
+                row.transactionKind === "income"
+                  ? "border-l-2 border-l-emerald-500/70 bg-emerald-500/5"
+                  : row.transactionKind === "investment"
+                    ? "border-l-2 border-l-indigo-500/70 bg-indigo-500/5"
+                    : "";
               const manualReviewClass = item.needs_manual_review ? "bg-destructive/5" : "";
               return (
                 <TableRow
                   key={`${item.name}-${idx}`}
-                  className={[incomeRowClass, manualReviewClass].filter(Boolean).join(" ") || undefined}
+                  className={[rowAccentClass, manualReviewClass].filter(Boolean).join(" ") || undefined}
                 >
                   <TableCell>
                     <div className="space-y-1">
-                      <p className={item.is_income ? "font-medium text-emerald-200" : undefined}>
+                      <p
+                        className={
+                          row.transactionKind === "income"
+                            ? "font-medium text-emerald-200"
+                            : row.transactionKind === "investment"
+                              ? "font-medium text-indigo-200"
+                              : undefined
+                        }
+                      >
                         {item.name}
                       </p>
-                      {item.is_income ? (
-                        <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-200">
-                          Income
-                        </Badge>
-                      ) : null}
                       {item.needs_manual_review ? (
                         <Badge variant="destructive">Needs categorization</Badge>
                       ) : null}
@@ -221,49 +289,66 @@ export function ReviewTable({
                       type="number"
                       step="0.01"
                       min="0"
-                      className={item.is_income ? "border-emerald-500/40 focus-visible:border-emerald-500" : undefined}
+                      className={
+                        row.transactionKind === "income"
+                          ? "border-emerald-500/40 focus-visible:border-emerald-500"
+                          : row.transactionKind === "investment"
+                            ? "border-indigo-500/40 focus-visible:border-indigo-500"
+                            : undefined
+                      }
                       value={String(row.cost)}
                       onChange={(event) => {
-                        const nextRows = [...rows];
-                        nextRows[idx] = { ...nextRows[idx], cost: Number(event.target.value) };
-                        setRows(nextRows);
+                        updateRow(idx, { cost: Number(event.target.value) });
                       }}
                     />
+                  </TableCell>
+                  <TableCell className="w-[140px]">
+                    <Select
+                      value={row.transactionKind}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        updateTransactionKind(idx, value as TransactionKind);
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TRANSACTION_KIND_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell className="min-w-[360px]">
                     {isSplitExpenseName(item.name) ? (
                       <SplitEditor
                         categories={rowCategories}
-                        categoryGroups={
-                          item.is_income
-                            ? categoryGroups?.filter((group) => group.id === "income")
-                            : categoryGroups?.filter((group) => group.id !== "income")
-                        }
+                        categoryGroups={rowCategoryGroups}
                         parts={row.splitParts}
                         onChange={(splitParts) => {
-                          const nextRows = [...rows];
-                          nextRows[idx] = { ...nextRows[idx], splitParts };
-                          setRows(nextRows);
+                          updateRow(idx, { splitParts });
                         }}
                       />
                     ) : (
                       <Select
                         value={row.category || undefined}
                         onValueChange={(value) => {
-                          const nextRows = [...rows];
-                          nextRows[idx] = { ...nextRows[idx], category: value ?? "" };
-                          setRows(nextRows);
+                          updateRow(idx, { category: value ?? "" });
                         }}
                       >
                         <SelectTrigger
                           className={[
                             "h-auto w-full min-w-0 py-2 *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-normal",
-                            item.is_income ? "border-emerald-500/40" : "",
+                            row.transactionKind === "income" ? "border-emerald-500/40" : "",
+                            row.transactionKind === "investment" ? "border-indigo-500/40" : "",
                           ]
                             .filter(Boolean)
                             .join(" ")}
                         >
-                          <SelectValue placeholder={item.is_income ? "Income category" : "Category"} />
+                          <SelectValue placeholder="Category" />
                         </SelectTrigger>
                         <SelectContent
                           alignItemWithTrigger={false}
@@ -271,11 +356,7 @@ export function ReviewTable({
                         >
                           <CategorySelectItems
                             categories={rowCategories}
-                            categoryGroups={
-                              item.is_income
-                                ? categoryGroups?.filter((group) => group.id === "income")
-                                : categoryGroups?.filter((group) => group.id !== "income")
-                            }
+                            categoryGroups={rowCategoryGroups}
                           />
                         </SelectContent>
                       </Select>
@@ -285,9 +366,7 @@ export function ReviewTable({
                     <input
                       checked={row.include}
                       onChange={(event) => {
-                        const nextRows = [...rows];
-                        nextRows[idx] = { ...nextRows[idx], include: event.target.checked };
-                        setRows(nextRows);
+                        updateRow(idx, { include: event.target.checked });
                       }}
                       type="checkbox"
                       className="size-4"

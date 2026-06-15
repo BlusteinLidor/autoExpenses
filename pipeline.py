@@ -133,12 +133,19 @@ def finalize_for_month(
     output_workbook_path: Path,
     categorized_output: str,
     progress_callback: Optional[Callable[[str], None]] = None,
+    expenses_dict: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Path, Path]:
     """Fill workbook, sync yearly total workbook and update state."""
     try:
         _emit_progress(progress_callback, "Step 5/5: Filling workbook...")
         print(f"[pipeline] Step 5: fillCells into {output_workbook_path}")
-        fillCells(str(output_workbook_path), categorized_output, month=month)
+        fillCells(
+            str(output_workbook_path),
+            categorized_output,
+            month=month,
+            expenses_dict=expenses_dict,
+            trust_provided_categories=True,
+        )
         total_workbook_path = sync_month_to_year_total(year=year, month=month)
         print(
             f"[pipeline] Yearly total synced for {year}-{str(month).zfill(2)} "
@@ -157,7 +164,7 @@ def run_for_month(
     include_leumi: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Path, Path]:
-    source_excel_path, output_workbook_path, sorted_expenses, _, _ = prepare_for_month(
+    source_excel_path, output_workbook_path, sorted_expenses, source_expenses_dict, _ = prepare_for_month(
         year=year,
         month=month,
         include_leumi=include_leumi,
@@ -169,5 +176,6 @@ def run_for_month(
         output_workbook_path=output_workbook_path,
         categorized_output=sorted_expenses,
         progress_callback=progress_callback,
+        expenses_dict=source_expenses_dict,
     )
     return source_excel_path, final_monthly

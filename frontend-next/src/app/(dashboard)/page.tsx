@@ -30,6 +30,11 @@ import { generateRunToken, monthName, safeNumber } from "@/lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
+function previousCalendarMonth(from = new Date()) {
+  const date = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+  return { year: String(date.getFullYear()), month: date.getMonth() + 1 };
+}
+
 function nextMonthFromState(state: Awaited<ReturnType<typeof getState>> | undefined) {
   const lastYear = Number(state?.last_filled_year);
   const lastMonth = Number(state?.last_filled_month);
@@ -47,13 +52,14 @@ function toTimelineComparable(year: string, month: number) {
 
 export default function DashboardPage() {
   const now = new Date();
+  const defaultPeriod = previousCalendarMonth(now);
   const queryClient = useQueryClient();
   const stateQuery = useQuery({ queryKey: ["state"], queryFn: getState });
   const assetsQuery = useQuery({ queryKey: ["assets"], queryFn: getAssets });
-  const [runYear, setRunYear] = useState(String(now.getFullYear()));
-  const [runMonth, setRunMonth] = useState(now.getMonth() + 1);
-  const [breakdownYear, setBreakdownYear] = useState(String(now.getFullYear()));
-  const [breakdownMonth, setBreakdownMonth] = useState(now.getMonth() + 1);
+  const [runYear, setRunYear] = useState(defaultPeriod.year);
+  const [runMonth, setRunMonth] = useState(defaultPeriod.month);
+  const [breakdownYear, setBreakdownYear] = useState(defaultPeriod.year);
+  const [breakdownMonth, setBreakdownMonth] = useState(defaultPeriod.month);
   const [timelineYear, setTimelineYear] = useState(String(now.getFullYear()));
   const [timelineMode, setTimelineMode] = useState<"year" | "trailing" | "range">("year");
   const [timelineTrailingMonths, setTimelineTrailingMonths] = useState(12);

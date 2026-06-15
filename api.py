@@ -209,6 +209,7 @@ def run_month_prepare(payload: Dict[str, Any]) -> Dict[str, Any]:
         "year": year,
         "month": month,
         "output_workbook_path": str(out),
+        "expenses_dict": source_expenses_dict,
     }
 
     return {
@@ -263,6 +264,7 @@ def run_month_finalize(payload: Dict[str, Any]) -> Dict[str, Any]:
             output_workbook_path=Path(review_state["output_workbook_path"]),
             categorized_output=categorized_output,
             progress_callback=_update_progress if run_token else None,
+            expenses_dict=review_state.get("expenses_dict"),
         )
     except Exception as error:
         if run_token:

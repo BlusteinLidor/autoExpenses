@@ -13,7 +13,13 @@ from bs4 import BeautifulSoup
 from openpyxl import Workbook
 from openpyxl import load_workbook
 
-from handleExcel import resolve_transaction_is_income
+from handleExcel import (
+    resolve_transaction_is_income,
+    EXPENSE_SOURCE_MAX,
+    EXPENSE_SOURCE_LEUMI_CHECKING,
+    EXPENSE_SOURCE_LEUMI_CARD,
+    EXPENSE_SOURCE_COL,
+)
 
 
 def _parse_number_hebrew(s: str) -> float:
@@ -99,12 +105,12 @@ def read_leumi_credit_cards_html(path: Path) -> List[Tuple[str, float]]:
     return rows
 
 
-def read_max_expense_rows(path: Path) -> List[Tuple[str, float, Optional[str], bool]]:
+def read_max_expense_rows(path: Path) -> List[Tuple[str, float, Optional[str], bool, str]]:
     """
     Read expense name (B), main category (C) and cost (F) from row 5 until first empty B.
     We preserve main-category so OpenAI has guidance when mapping to sub-categories.
     """
-    rows: List[Tuple[str, float, Optional[str], bool]] = []
+    rows: List[Tuple[str, float, Optional[str], bool, str]] = []
     wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
     row = 5
@@ -125,24 +131,25 @@ def read_max_expense_rows(path: Path) -> List[Tuple[str, float, Optional[str], b
         )
         category_cell = ws[f"C{row}"].value
         category = str(category_cell).strip() if category_cell is not None else None
-        rows.append((str(name_cell).strip(), cost, category or None, is_income))
+        rows.append((str(name_cell).strip(), cost, category or None, is_income, EXPENSE_SOURCE_MAX))
         row += 1
     wb.close()
     return rows
 
 
-def write_combined_workbook(rows: List[Tuple[str, float, Optional[str], bool]], output_path: Path) -> None:
+def write_combined_workbook(rows: List[Tuple[str, float, Optional[str], bool, str]], output_path: Path) -> None:
     """
-    Write a workbook compatible with getExpenses: from row 5, B=name, C=category (main), F=cost.
+    Write a workbook compatible with getExpenses: from row 5, B=name, C=category (main), F=cost, H=source.
     """
     wb = Workbook()
     ws = wb.active
     start_row = 5
-    for i, (name, cost, category, is_income) in enumerate(rows):
+    for i, (name, cost, category, is_income, source) in enumerate(rows):
         r = start_row + i
         ws[f"B{r}"] = name
         ws[f"C{r}"] = category
         ws[f"F{r}"] = cost
+        ws[f"{EXPENSE_SOURCE_COL}{r}"] = source
         if is_income:
             ws[f"G{r}"] = 1
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,18 +166,18 @@ def merge_max_and_leumi(
     Combine Max export and Leumi (transactions + cards) into one workbook at output_path.
     Returns output_path. Order: Max rows first, then Leumi transactions, then Leumi cards.
     """
-    all_rows: List[Tuple[str, float, Optional[str], bool]] = []
+    all_rows: List[Tuple[str, float, Optional[str], bool, str]] = []
 
     if max_excel_path.exists():
         all_rows.extend(read_max_expense_rows(max_excel_path))
 
     if leumi_transactions_path.exists():
         for name, amount, is_income in read_leumi_transactions_html(leumi_transactions_path):
-            all_rows.append((name, amount, None, is_income))
+            all_rows.append((name, amount, None, is_income, EXPENSE_SOURCE_LEUMI_CHECKING))
 
     if leumi_cards_path.exists():
         for name, amount, is_income in read_leumi_credit_cards_html(leumi_cards_path):
-            all_rows.append((name, amount, None, is_income))
+            all_rows.append((name, amount, None, is_income, EXPENSE_SOURCE_LEUMI_CARD))
 
     write_combined_workbook(all_rows, output_path)
     return output_path

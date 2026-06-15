@@ -31,7 +31,7 @@ def runPipeline():
         def _progress(step_text: str):
             loading(step_text)
 
-        _, output_path, ai_output, _, _ = prepare_for_month(
+        _, output_path, ai_output, expenses_dict, _ = prepare_for_month(
             year=year,
             month=month,
             include_leumi=include_leumi,
@@ -42,6 +42,7 @@ def runPipeline():
             month=month,
             output_path=output_path,
             ai_output=ai_output,
+            expenses_dict=expenses_dict,
         )
     except Exception as e:
         messagebox.showerror("Failure", f"Error while running pipeline:\n{e}")
@@ -136,7 +137,7 @@ def _create_category_combobox(
     return combo
 
 
-def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
+def show_corrections_dialog(year: str, month: str, output_path, ai_output: str, expenses_dict=None):
     parsed_items, parse_errors = parse_ai_output_lines(ai_output)
     allowed_categories = get_allowed_categories(str(output_path))
 
@@ -453,6 +454,7 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str):
                 output_workbook_path=output_path,
                 categorized_output=reviewed_output,
                 progress_callback=loading,
+                expenses_dict=expenses_dict,
             )
             dialog.destroy()
             messagebox.showinfo(

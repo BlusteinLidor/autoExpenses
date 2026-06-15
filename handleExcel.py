@@ -19,6 +19,12 @@ _CARD_STATEMENT_DUPLICATE_PATTERNS = [
     "ל.מאסטרקרד(יש)",
 ]
 
+EXPENSE_SOURCE_MAX = "Max"
+EXPENSE_SOURCE_LEUMI_CHECKING = 'לאומי עו"ש'
+EXPENSE_SOURCE_LEUMI_CARD = "לאומי כרטיס"
+EXPENSE_SOURCE_COL = "H"
+DEFAULT_EXPENSE_SOURCE = EXPENSE_SOURCE_MAX
+
 _DEFAULT_INCOME_FALLBACK_CATEGORY = "הכנסה אחרת / חד פעמית"
 # Explicit income-source overrides: when an expense name matches one of these
 # patterns, force it into the matching income category (rows 6..12 in template).
@@ -236,6 +242,31 @@ def _expense_dict_is_income(expense_values) -> bool:
     if not expense_values or len(expense_values) < 3:
         return False
     return bool(expense_values[2])
+
+
+def _merge_expense_sources(existing_source: str | None, new_source: str) -> str:
+    sources: list[str] = []
+    for part in str(existing_source or "").split(","):
+        label = part.strip()
+        if label and label not in sources:
+            sources.append(label)
+    if new_source and new_source not in sources:
+        sources.append(new_source)
+    return ", ".join(sources) if sources else DEFAULT_EXPENSE_SOURCE
+
+
+def _lookup_expense_source_from_dict(expenses_dict: dict | None, name: str) -> str:
+    if not expenses_dict:
+        return DEFAULT_EXPENSE_SOURCE
+    direct = expenses_dict.get(name)
+    if direct is not None and len(direct) > 3 and direct[3]:
+        return str(direct[3])
+    normalized = _normalize_review_name_key(name)
+    for expense_name, expense_values in expenses_dict.items():
+        if _normalize_review_name_key(str(expense_name)) == normalized:
+            if len(expense_values) > 3 and expense_values[3]:
+                return str(expense_values[3])
+    return DEFAULT_EXPENSE_SOURCE
 
 
 def _lookup_is_income_from_dict(expenses_dict: dict | None, name: str) -> bool:
@@ -481,11 +512,17 @@ def getExpenses(workbook_path):
         expenseCostCell = ws[expenseCol + str(categoryRow)]
         expenseCategoryCell = ws[categoryCol + str(categoryRow)]
         incomeFlagCell = ws["G" + str(categoryRow)]
+        sourceCell = ws[EXPENSE_SOURCE_COL + str(categoryRow)]
         raw_cost = expenseCostCell.value
         cost_value = _to_float(raw_cost)
         is_income = resolve_transaction_is_income(
             str(expenseNameCell.value or ""),
             _workbook_row_is_income(incomeFlagCell.value),
+        )
+        source_label = (
+            str(sourceCell.value).strip()
+            if sourceCell.value is not None and str(sourceCell.value).strip()
+            else DEFAULT_EXPENSE_SOURCE
         )
         if raw_cost is not None and not isinstance(raw_cost, (int, float)):
             print(f"[getExpenses] Row {categoryRow}: B={expenseNameCell.value!r} F(raw)={raw_cost!r} -> cost={cost_value}")
@@ -499,6 +536,10 @@ def getExpenses(workbook_path):
                 existing.append(is_income)
             else:
                 existing[2] = existing[2] or is_income
+            if len(existing) < 4:
+                existing.append(source_label)
+            else:
+                existing[3] = _merge_expense_sources(existing[3], source_label)
             totalCost += cost_value
         # else, add the expense name, it's cost and it's category
         else:
@@ -508,6 +549,7 @@ def getExpenses(workbook_path):
                         cost_value,
                         expenseCategoryCell.value if expenseCategoryCell.value is not None else "",
                         is_income,
+                        source_label,
                     ]
                 }
             )
@@ -534,7 +576,13 @@ def getExpenses(workbook_path):
 # dict with the total cost for each category. then, add the category's cost to the final excel sheet
 
 
-def fillCells(outputWorkbookPath, openAIOutput, month):
+def fillCells(
+    outputWorkbookPath,
+    openAIOutput,
+    month,
+    expenses_dict=None,
+    trust_provided_categories: bool = False,
+):
     # load the excel workbook
     wb = load_workbook(outputWorkbookPath)
     # get the active (default) worksheet
@@ -681,26 +729,26 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
                 print(f"[fillCells] Line {line_no}: cost parse issue: {parse_err}")
                 errorString += f"Invalid cost value: {val}\n"
                 continue
-        # Income-source hard override (before regular category logic).
-        normalized_income_key = _normalize_income_name_key(name)
-        forced_income_category = income_overrides_norm.get(normalized_income_key)
-        if forced_income_category:
-            if forced_income_category not in allowed_categories:
-                forced_income_category = (
-                    _DEFAULT_INCOME_FALLBACK_CATEGORY
-                    if _DEFAULT_INCOME_FALLBACK_CATEGORY in allowed_categories
-                    else _best_category_match(_DEFAULT_INCOME_FALLBACK_CATEGORY)
-                )
-            category = forced_income_category
+        if not trust_provided_categories:
+            # Income/investment hard overrides apply to AI output only; reviewed choices win.
+            normalized_income_key = _normalize_income_name_key(name)
+            forced_income_category = income_overrides_norm.get(normalized_income_key)
+            if forced_income_category:
+                if forced_income_category not in allowed_categories:
+                    forced_income_category = (
+                        _DEFAULT_INCOME_FALLBACK_CATEGORY
+                        if _DEFAULT_INCOME_FALLBACK_CATEGORY in allowed_categories
+                        else _best_category_match(_DEFAULT_INCOME_FALLBACK_CATEGORY)
+                    )
+                category = forced_income_category
 
-        forced_investment_category = investment_overrides_norm.get(normalized_income_key)
-        if forced_investment_category:
-            category = forced_investment_category
+            forced_investment_category = investment_overrides_norm.get(normalized_income_key)
+            if forced_investment_category:
+                category = forced_investment_category
 
-        # If user specified a correction for this expense, use it; otherwise use AI category
-        normalized_name_key = _normalize_expense_name_for_corrections(name)
-        if normalized_name_key in user_corrections_norm:
-            category = user_corrections_norm[normalized_name_key]
+            normalized_name_key = _normalize_expense_name_for_corrections(name)
+            if normalized_name_key in user_corrections_norm:
+                category = user_corrections_norm[normalized_name_key]
         expenseNameCostCategoryDict[name] = [cost_value, _best_category_match(category)]
 
     for val in expenseNameCostCategoryDict:
@@ -721,11 +769,12 @@ def fillCells(outputWorkbookPath, openAIOutput, month):
                     )
                     ws[f"{expenseCol}{categoryRow}"].value = existing_float + add_amount
 
-                # Add comment with expense origin
+                source_label = _lookup_expense_source_from_dict(expenses_dict, val)
+                comment_line = f"{val} - {add_amount} ({source_label})"
                 if ws[f"{expenseCol}{categoryRow}"].comment is None:
                     ws[f"{expenseCol}{categoryRow}"].comment = Comment("", "Automated")
                 comment = Comment(
-                    val + " - " + str(add_amount),
+                    comment_line,
                     "Automated",
                 )
                 if comment.text != "":
