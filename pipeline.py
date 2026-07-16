@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import traceback
 
 from config import get_paths, get_state, update_state, load_env, validate_env
@@ -7,6 +7,7 @@ from getExcelFileFromMax import getExcelFile
 from getExcelFileFromLeumi import getLeumiData
 from handleExcel import getExpenses, fillCells
 from merge_expenses import merge_max_and_leumi
+from reconciliation import build_reconciliation_report, write_reconciliation_report
 from yearly_totals import sync_month_to_year_total
 
 
@@ -21,7 +22,7 @@ def prepare_for_month(
     month: str,
     include_leumi: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
-) -> Tuple[Path, Path, str, Dict[str, Any], list[str]]:
+) -> Tuple[Path, Path, str, list, list[str]]:
     """
     End-to-end pipeline for a given year/month:
     - Download Max Excel (and optionally Leumi when include_leumi=True)
@@ -29,7 +30,7 @@ def prepare_for_month(
     - Run getExpenses on the merged or Max-only file
     - Use OpenAI (+ RAG) to categorize
     - Fill cells in the current output workbook
-    Returns (source_excel_path, output_workbook_path).
+    Returns (source_excel_path, output_workbook_path, ai_output, expenses_list, warnings).
     """
     load_env()
     validate_env(require_max=True, require_leumi=include_leumi)
@@ -38,6 +39,11 @@ def prepare_for_month(
     month_padded = str(month).zfill(2)
     year_dir = paths.data_dir / str(year)
     year_dir.mkdir(parents=True, exist_ok=True)
+    month_dir = paths.data_dir / f"{year}_{month}"
+    month_dir.mkdir(parents=True, exist_ok=True)
+
+    leumi_trans_path: Optional[Path] = None
+    leumi_cards_path: Optional[Path] = None
 
     # 1. Download from Max; function already appends foreign exchange rows.
     try:
@@ -55,7 +61,7 @@ def prepare_for_month(
             print("[pipeline] Step 2: Download Leumi + merge")
             leumi_trans_path, leumi_cards_path = getLeumiData(year, month)
             combined_path = year_dir / f"combined_expenses_{year}_{month}.xlsx"
-            merge_max_and_leumi(
+            _, merge_dedupe_stats = merge_max_and_leumi(
                 source_excel_path,
                 Path(leumi_trans_path),
                 Path(leumi_cards_path),
@@ -67,12 +73,37 @@ def prepare_for_month(
             print(f"[pipeline][error] {type(e).__name__}: {e}")
             print(traceback.format_exc())
             raise RuntimeError(f"Pipeline failed at step 2 (Leumi download/merge): {e}") from e
+    else:
+        merge_dedupe_stats = None
+
+    state = get_state()
+    capture_report = state.get("last_max_capture")
+    recon = build_reconciliation_report(
+        year=year,
+        month=month,
+        max_excel_path=Path(
+            paths.max_exports_dir / f"transaction-details_export_{year}_{month}.xlsx"
+        ),
+        leumi_transactions_path=Path(leumi_trans_path) if leumi_trans_path else None,
+        leumi_cards_path=Path(leumi_cards_path) if leumi_cards_path else None,
+        combined_path=source_excel_path if include_leumi else None,
+        max_capture=capture_report if isinstance(capture_report, dict) else None,
+        merge_dedupe_stats=merge_dedupe_stats,
+    )
+    write_reconciliation_report(
+        recon, month_dir / "reconciliation.json"
+    )
+    if recon.get("blocking_errors"):
+        details = "; ".join(str(x) for x in recon["blocking_errors"])
+        raise RuntimeError(
+            "Pipeline blocked by reconciliation checks: " + details
+        )
 
     # 3. Categorize expenses from the (merged or Max-only) file
     try:
         _emit_progress(progress_callback, "Step 3/5: Categorizing expenses with AI...")
         print("[pipeline] Step 3: getExpenses (read + AI categorize)")
-        sorted_expenses, source_expenses_dict = getExpenses(str(source_excel_path))
+        sorted_expenses, source_expenses_list = getExpenses(str(source_excel_path))
     except Exception as e:
         raise RuntimeError(f"Pipeline failed at step 3 (getExpenses/categorize): {e}") from e
 
@@ -89,8 +120,23 @@ def prepare_for_month(
         output_workbook_path.write_bytes(paths.template_expenses.read_bytes())
 
     capture_warnings: list[str] = []
-    state = get_state()
-    capture_report = state.get("last_max_capture")
+    capture_warnings.extend(str(w) for w in (recon.get("warnings") or []))
+    if merge_dedupe_stats:
+        dropped = int(merge_dedupe_stats.get("dropped_count") or 0)
+        if dropped:
+            capture_warnings.append(
+                f"Removed {dropped} card-settlement duplicate(s) from checking "
+                f"(₪{merge_dedupe_stats.get('dropped_amount_sum', 0)}) — kept "
+                "Max/Leumi merchant detail instead."
+            )
+        for w in merge_dedupe_stats.get("warnings") or []:
+            if str(w) not in capture_warnings:
+                capture_warnings.append(str(w))
+    if not recon.get("card_export_healthy") and include_leumi:
+        capture_warnings.append(
+            "Leumi card merchant export is not healthy — card settlement lines "
+            "in checking will NOT be auto-excluded as duplicates."
+        )
     if isinstance(capture_report, dict):
         immediate = capture_report.get("immediate") or {}
         foreign = capture_report.get("foreign") or {}
@@ -118,11 +164,18 @@ def prepare_for_month(
                 + str(foreign.get("error"))
             )
 
+    # Stash reconciliation flags for the API review step.
+    card_healthy = True if not include_leumi else bool(recon.get("card_export_healthy"))
+    source_expenses_list = list(source_expenses_list)
+    for row in source_expenses_list:
+        if isinstance(row, dict):
+            row["_card_export_healthy"] = card_healthy
+
     return (
         source_excel_path,
         output_workbook_path,
         sorted_expenses,
-        source_expenses_dict,
+        source_expenses_list,
         capture_warnings,
     )
 
@@ -133,7 +186,7 @@ def finalize_for_month(
     output_workbook_path: Path,
     categorized_output: str,
     progress_callback: Optional[Callable[[str], None]] = None,
-    expenses_dict: Optional[Dict[str, Any]] = None,
+    expenses_dict: Optional[Any] = None,
 ) -> Tuple[Path, Path]:
     """Fill workbook, sync yearly total workbook and update state."""
     try:

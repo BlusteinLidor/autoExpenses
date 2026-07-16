@@ -12,18 +12,38 @@ from config import (
 )
 from rag_categories import get_category_corrections
 from difflib import SequenceMatcher
+from collections import Counter
+from datetime import date, datetime
 import re
 
-_CARD_STATEMENT_DUPLICATE_PATTERNS = [
-    "מקס איט פיננ~י",
-    "ל.מאסטרקרד(יש)",
-]
+# Bank checking-account settlement lines that already have merchant detail elsewhere.
+# Prefer card/merchant exports; drop these lumps when that detail is present.
+_CARD_SETTLEMENT_PATTERNS: dict[str, list[str]] = {
+    "max": [
+        "מקס איט פיננ~י",
+        "מקס איט פיננ-י",
+        "מקס איט פיננסים",
+    ],
+    "leumi_mastercard": [
+        "ל.מאסטרקרד(יש)",
+        "ל.מאסטרקרד",
+        "מאסטרקרד(יש)",
+    ],
+}
 
 EXPENSE_SOURCE_MAX = "Max"
 EXPENSE_SOURCE_LEUMI_CHECKING = 'לאומי עו"ש'
 EXPENSE_SOURCE_LEUMI_CARD = "לאומי כרטיס"
 EXPENSE_SOURCE_COL = "H"
+EXPENSE_DATE_COL = "A"
 DEFAULT_EXPENSE_SOURCE = EXPENSE_SOURCE_MAX
+KNOWN_EXPENSE_SOURCES = frozenset(
+    {
+        EXPENSE_SOURCE_MAX,
+        EXPENSE_SOURCE_LEUMI_CHECKING,
+        EXPENSE_SOURCE_LEUMI_CARD,
+    }
+)
 
 _DEFAULT_INCOME_FALLBACK_CATEGORY = "הכנסה אחרת / חד פעמית"
 # Explicit income-source overrides: when an expense name matches one of these
@@ -37,19 +57,146 @@ def _normalize_for_fuzzy_name(s: str) -> str:
     return re.sub(r"[^א-תa-zA-Z0-9]", "", str(s or "").lower())
 
 
-def is_card_statement_duplicate_expense(expense_name: str, threshold: float = 0.66) -> bool:
+def normalize_expense_date(raw_date) -> str | None:
+    """Normalize workbook/export dates to ISO YYYY-MM-DD when possible."""
+    if raw_date is None:
+        return None
+    if isinstance(raw_date, datetime):
+        return raw_date.date().isoformat()
+    if isinstance(raw_date, date):
+        return raw_date.isoformat()
+    if isinstance(raw_date, (int, float)):
+        # Excel serial date (openpyxl sometimes returns floats for date cells).
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            return from_excel(raw_date).date().isoformat()
+        except Exception:
+            return None
+    text = str(raw_date).strip()
+    if not text:
+        return None
+    for fmt in (
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%d.%m.%Y",
+        "%d/%m/%y",
+        "%d.%m.%y",
+        "%d-%m-%y",
+    ):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return text
+
+
+def _iter_expense_entries(expenses_dict) -> list[tuple[str, list]]:
+    """Normalize dict or list-of-rows expense sources to (name, values) pairs.
+
+    values layout: [cost, category, is_income, source, date]
     """
-    Detect card-statement duplicate lines (that already appear in bank statement).
-    Uses a little fuzziness to catch small variations/typos.
+    if not expenses_dict:
+        return []
+    if isinstance(expenses_dict, list):
+        pairs: list[tuple[str, list]] = []
+        for item in expenses_dict:
+            if isinstance(item, dict):
+                name = str(item.get("name", "")).strip()
+                values = [
+                    float(item.get("cost", 0.0) or 0.0),
+                    item.get("category", "") or "",
+                    bool(item.get("is_income", False)),
+                    item.get("source", DEFAULT_EXPENSE_SOURCE) or DEFAULT_EXPENSE_SOURCE,
+                    normalize_expense_date(item.get("date")),
+                ]
+                pairs.append((name, values))
+            elif isinstance(item, (tuple, list)) and len(item) >= 2:
+                pairs.append((str(item[0]), list(item[1])))
+        return pairs
+    if isinstance(expenses_dict, dict):
+        return [(str(k), list(v) if not isinstance(v, list) else v) for k, v in expenses_dict.items()]
+    return []
+
+
+def _expense_entries_as_ai_dict(expenses_dict) -> dict:
+    """
+    Build an AI-facing mapping without collapsing same-name rows.
+    Duplicate names get a stable suffix that sortExpensesAI / review can strip.
+    """
+    result: dict = {}
+    seen: dict[str, int] = {}
+    for name, values in _iter_expense_entries(expenses_dict):
+        count = seen.get(name, 0) + 1
+        seen[name] = count
+        key = name if count == 1 else f"{name} ##{count}"
+        result[key] = values
+    return result
+
+
+def _strip_duplicate_name_suffix(name: str) -> str:
+    return re.sub(r"\s*##\d+\s*$", "", str(name or "")).strip()
+
+
+def normalize_expense_source(
+    raw_source,
+    *,
+    default: str = DEFAULT_EXPENSE_SOURCE,
+) -> str:
+    """
+    Coerce workbook column H into a known source label.
+    Max native exports often put amounts in H; treat those as Max.
+    """
+    if raw_source is None:
+        return default
+    text = str(raw_source).strip()
+    if not text:
+        return default
+    if text in KNOWN_EXPENSE_SOURCES:
+        return text
+    return default
+
+
+def card_settlement_kind(
+    expense_name: str,
+    threshold: float = 0.66,
+) -> str | None:
+    """
+    Return 'max', 'leumi_mastercard', or None for non-settlement names.
     """
     normalized = _normalize_for_fuzzy_name(expense_name)
     if not normalized:
+        return None
+    best_kind: str | None = None
+    best_score = 0.0
+    for kind, patterns in _CARD_SETTLEMENT_PATTERNS.items():
+        for pattern in patterns:
+            score = SequenceMatcher(
+                None, normalized, _normalize_for_fuzzy_name(pattern)
+            ).ratio()
+            if score >= threshold and score > best_score:
+                best_score = score
+                best_kind = kind
+    return best_kind
+
+
+def is_card_statement_duplicate_expense(
+    expense_name: str,
+    threshold: float = 0.66,
+    *,
+    allow_exclusion: bool = True,
+) -> bool:
+    """
+    Detect card-statement duplicate lines (that already appear in bank statement).
+    Uses a little fuzziness to catch small variations/typos.
+
+    When allow_exclusion is False (e.g. card merchant export failed), never treat
+    settlement lines as excludable duplicates — they may be the only card signal.
+    """
+    if not allow_exclusion:
         return False
-    for pattern in _CARD_STATEMENT_DUPLICATE_PATTERNS:
-        score = SequenceMatcher(None, normalized, _normalize_for_fuzzy_name(pattern)).ratio()
-        if score >= threshold:
-            return True
-    return False
+    return card_settlement_kind(expense_name, threshold=threshold) is not None
 
 
 def _normalize_income_name_key(s: str) -> str:
@@ -200,6 +347,7 @@ def parse_ai_output_lines(openAIOutput: str) -> tuple[list[dict], list[str]]:
             name = m.group("name")
             cost_str = m.group("amount")
             category = m.group("cat")
+        name = _strip_duplicate_name_suffix(str(name).strip())
 
         cost_value, parse_err = _safe_float_from_string(
             cost_str, context=f"line {i+1}: {val!r}"
@@ -222,11 +370,14 @@ def parse_ai_output_lines(openAIOutput: str) -> tuple[list[dict], list[str]]:
             if parse_err is not None:
                 errors.append(f"Line {i+1} invalid cost: {val} ({parse_err})")
                 continue
+        name = _strip_duplicate_name_suffix(
+            re.sub(r"[\uFFFD\"״״׳׳“””']+$", "", str(name).strip()).strip()
+        )
         parsed.append(
             {
                 # Normalize a couple of trailing "quote / replacement" artifacts that the model may add.
                 # This is intentionally conservative: we only trim a small set of characters at the end.
-                "name": re.sub(r"[\uFFFD\"״״׳׳“””']+$", "", name.strip()).strip(),
+                "name": name,
                 "cost": float(cost_value),
                 "category": str(category).strip(),
             }
@@ -255,31 +406,101 @@ def _merge_expense_sources(existing_source: str | None, new_source: str) -> str:
     return ", ".join(sources) if sources else DEFAULT_EXPENSE_SOURCE
 
 
-def _lookup_expense_source_from_dict(expenses_dict: dict | None, name: str) -> str:
+def _lookup_expense_source_from_dict(expenses_dict: dict | list | None, name: str) -> str:
     if not expenses_dict:
         return DEFAULT_EXPENSE_SOURCE
-    direct = expenses_dict.get(name)
-    if direct is not None and len(direct) > 3 and direct[3]:
-        return str(direct[3])
-    normalized = _normalize_review_name_key(name)
-    for expense_name, expense_values in expenses_dict.items():
-        if _normalize_review_name_key(str(expense_name)) == normalized:
+    want = _normalize_review_name_key(_strip_duplicate_name_suffix(name))
+    for expense_name, expense_values in _iter_expense_entries(expenses_dict):
+        if _normalize_review_name_key(_strip_duplicate_name_suffix(str(expense_name))) == want:
             if len(expense_values) > 3 and expense_values[3]:
                 return str(expense_values[3])
     return DEFAULT_EXPENSE_SOURCE
 
 
-def _lookup_is_income_from_dict(expenses_dict: dict | None, name: str) -> bool:
+def _build_expense_meta_bag(
+    expenses_dict: dict | list | None,
+) -> dict[tuple[str, float], list[tuple[str, str | None]]]:
+    """Map (normalized name, rounded cost) -> remaining (source, date) pairs."""
+    bag: dict[tuple[str, float], list[tuple[str, str | None]]] = {}
+    if not expenses_dict:
+        return bag
+    for expense_name, expense_values in _iter_expense_entries(expenses_dict):
+        key = _normalize_review_name_key(_strip_duplicate_name_suffix(str(expense_name)))
+        if not key:
+            continue
+        cost_key = round(abs(float(expense_values[0]) if expense_values else 0.0), 2)
+        source_label = (
+            str(expense_values[3]).strip()
+            if len(expense_values) > 3 and expense_values[3]
+            else DEFAULT_EXPENSE_SOURCE
+        )
+        date_label = (
+            normalize_expense_date(expense_values[4])
+            if len(expense_values) > 4
+            else None
+        )
+        bag.setdefault((key, cost_key), []).append(
+            (source_label or DEFAULT_EXPENSE_SOURCE, date_label)
+        )
+    return bag
+
+
+def _consume_expense_meta(
+    meta_bag: dict[tuple[str, float], list[tuple[str, str | None]]],
+    name: str,
+    cost: float,
+) -> tuple[str, str | None]:
+    """Pop matching (source, date) for this review row, preferring name+amount."""
+    key = _normalize_review_name_key(_strip_duplicate_name_suffix(name))
+    if not key:
+        return DEFAULT_EXPENSE_SOURCE, None
+    cost_key = round(abs(float(cost or 0.0)), 2)
+    exact = meta_bag.get((key, cost_key))
+    if exact:
+        return exact.pop(0)
+    for (bag_key, _bag_cost), remaining in meta_bag.items():
+        if remaining and bag_key == key:
+            return remaining.pop(0)
+    return DEFAULT_EXPENSE_SOURCE, None
+
+
+def _build_expense_source_bag(
+    expenses_dict: dict | list | None,
+) -> dict[tuple[str, float], list[str]]:
+    """Map (normalized name, rounded cost) -> remaining source labels for review rows."""
+    bag: dict[tuple[str, float], list[str]] = {}
+    for key, metas in _build_expense_meta_bag(expenses_dict).items():
+        bag[key] = [source for source, _date in metas]
+    return bag
+
+
+def _consume_expense_source(
+    source_bag: dict[tuple[str, float], list[str]],
+    name: str,
+    cost: float,
+) -> str:
+    """Pop a matching source label for this review row, preferring name+amount matches."""
+    key = _normalize_review_name_key(_strip_duplicate_name_suffix(name))
+    if not key:
+        return DEFAULT_EXPENSE_SOURCE
+    cost_key = round(abs(float(cost or 0.0)), 2)
+    exact = source_bag.get((key, cost_key))
+    if exact:
+        return exact.pop(0)
+    for (bag_key, bag_cost), remaining in source_bag.items():
+        if remaining and bag_key == key:
+            return remaining.pop(0)
+    return DEFAULT_EXPENSE_SOURCE
+
+
+def _lookup_is_income_from_dict(expenses_dict: dict | list | None, name: str) -> bool:
     if is_investment_transfer_name(name):
         return False
     if not expenses_dict:
         return False
-    direct = expenses_dict.get(name)
-    if direct is not None:
-        return _expense_dict_is_income(direct)
-    normalized = _normalize_review_name_key(name)
-    for expense_name, expense_values in expenses_dict.items():
-        if _normalize_review_name_key(str(expense_name)) == normalized:
+    want = _normalize_review_name_key(_strip_duplicate_name_suffix(name))
+    for expense_name, expense_values in _iter_expense_entries(expenses_dict):
+        if _normalize_review_name_key(_strip_duplicate_name_suffix(str(expense_name))) == want:
             return _expense_dict_is_income(expense_values)
     return False
 
@@ -329,40 +550,72 @@ def parse_errors_to_review_items(parse_errors: list[str]) -> list[dict]:
 
 
 def find_expenses_missing_from_parsed(
-    expenses_dict: dict,
+    expenses_dict: dict | list,
     parsed_items: list[dict],
+    *,
+    allow_duplicate_exclusion: bool = True,
 ) -> list[dict]:
-    """Find source workbook expenses that never made it into parsed AI output."""
-    parsed_keys: list[str] = []
+    """Find source workbook expenses that never made it into parsed AI output.
+
+    Matches by (normalized name, amount) with multiplicity so duplicate merchant
+    names are not collapsed into a single match.
+    """
+    parsed_bag: Counter[tuple[str, float]] = Counter()
     for item in parsed_items:
-        key = _normalize_review_name_key(str(item.get("name", "")))
-        if key:
-            parsed_keys.append(key)
+        raw_name = _strip_duplicate_name_suffix(str(item.get("name", "")))
+        key = _normalize_review_name_key(raw_name)
+        if not key:
+            continue
+        cost = round(abs(float(item.get("cost", 0.0) or 0.0)), 2)
+        parsed_bag[(key, cost)] += 1
 
     missing_items: list[dict] = []
-    for expense_name, expense_values in expenses_dict.items():
-        source_key = _normalize_review_name_key(str(expense_name))
+    for expense_name, expense_values in _iter_expense_entries(expenses_dict):
+        display_name = _strip_duplicate_name_suffix(str(expense_name))
+        source_key = _normalize_review_name_key(display_name)
         if not source_key:
             continue
+        cost_value = float(expense_values[0]) if expense_values else 0.0
+        cost_key = round(abs(cost_value), 2)
         matched = False
-        for parsed_key in parsed_keys:
-            if parsed_key == source_key:
-                matched = True
-                break
-            if SequenceMatcher(None, parsed_key, source_key).ratio() >= 0.9:
-                matched = True
-                break
+        if parsed_bag[(source_key, cost_key)] > 0:
+            parsed_bag[(source_key, cost_key)] -= 1
+            matched = True
+        else:
+            for (parsed_key, parsed_cost), remaining in list(parsed_bag.items()):
+                if remaining <= 0 or parsed_cost != cost_key:
+                    continue
+                if (
+                    parsed_key == source_key
+                    or SequenceMatcher(None, parsed_key, source_key).ratio() >= 0.9
+                ):
+                    parsed_bag[(parsed_key, parsed_cost)] -= 1
+                    matched = True
+                    break
         if matched:
             continue
-        cost_value = float(expense_values[0]) if expense_values else 0.0
         source_category = str(expense_values[1]) if len(expense_values) > 1 else ""
+        source_label = (
+            str(expense_values[3]).strip()
+            if len(expense_values) > 3 and expense_values[3]
+            else DEFAULT_EXPENSE_SOURCE
+        )
+        date_label = (
+            normalize_expense_date(expense_values[4])
+            if len(expense_values) > 4
+            else None
+        )
         missing_items.append(
             {
-                "name": str(expense_name),
+                "name": display_name,
                 "cost": cost_value,
                 "category": source_category,
                 "is_income": _expense_dict_is_income(expense_values),
-                "is_possible_duplicate": is_card_statement_duplicate_expense(str(expense_name)),
+                "source": source_label or DEFAULT_EXPENSE_SOURCE,
+                "date": date_label,
+                "is_possible_duplicate": is_card_statement_duplicate_expense(
+                    display_name, allow_exclusion=allow_duplicate_exclusion
+                ),
                 "needs_manual_review": True,
                 "error_reason": "AI did not return a categorized line for this expense.",
             }
@@ -373,7 +626,9 @@ def find_expenses_missing_from_parsed(
 def build_review_items(
     parsed_items: list[dict],
     parse_errors: list[str],
-    expenses_dict: dict | None = None,
+    expenses_dict: dict | list | None = None,
+    *,
+    allow_duplicate_exclusion: bool = True,
 ) -> tuple[list[dict], list[str]]:
     """
     Merge successfully parsed AI items with rows that need manual review.
@@ -381,10 +636,10 @@ def build_review_items(
     """
     warnings: list[str] = []
     review_items: list[dict] = []
-    seen_keys: set[tuple[str, float]] = set()
+    meta_bag = _build_expense_meta_bag(expenses_dict)
 
     def _append_item(item: dict) -> None:
-        name = str(item.get("name", "")).strip()
+        name = _strip_duplicate_name_suffix(str(item.get("name", "")).strip())
         cost = abs(float(item.get("cost", 0.0)))
         is_income = resolve_transaction_is_income(
             name,
@@ -398,16 +653,17 @@ def build_review_items(
         }.get(_normalize_income_name_key(name))
         if investment_category:
             category = investment_category
-        key = (_normalize_review_name_key(name), round(cost, 2), is_income)
-        if key in seen_keys:
-            return
-        seen_keys.add(key)
+        consumed_source, consumed_date = _consume_expense_meta(meta_bag, name, cost)
+        source = str(item.get("source", "") or "").strip() or consumed_source
+        date_label = normalize_expense_date(item.get("date")) or consumed_date
         review_items.append(
             {
                 "name": name,
                 "cost": cost,
                 "category": category,
                 "is_income": is_income,
+                "source": source,
+                "date": date_label,
                 "is_possible_duplicate": bool(item.get("is_possible_duplicate", False)),
                 "needs_manual_review": bool(item.get("needs_manual_review", False)),
                 "error_reason": (
@@ -422,8 +678,10 @@ def build_review_items(
         _append_item(
             {
                 **item,
+                "name": _strip_duplicate_name_suffix(str(item.get("name", ""))),
                 "is_possible_duplicate": is_card_statement_duplicate_expense(
-                    str(item.get("name", ""))
+                    str(item.get("name", "")),
+                    allow_exclusion=allow_duplicate_exclusion,
                 ),
                 "needs_manual_review": False,
                 "error_reason": None,
@@ -431,11 +689,38 @@ def build_review_items(
         )
 
     for item in parse_errors_to_review_items(parse_errors):
+        item["is_possible_duplicate"] = is_card_statement_duplicate_expense(
+            str(item.get("name", "")),
+            allow_exclusion=allow_duplicate_exclusion,
+        )
         _append_item(item)
 
     if expenses_dict:
-        for item in find_expenses_missing_from_parsed(expenses_dict, parsed_items):
+        for item in find_expenses_missing_from_parsed(
+            expenses_dict,
+            parsed_items,
+            allow_duplicate_exclusion=allow_duplicate_exclusion,
+        ):
             _append_item(item)
+
+    # Hard-remove settlement duplicates from the review list when exclusion is allowed.
+    # Soft unchecked boxes are not enough — users can re-include and double-count.
+    if allow_duplicate_exclusion:
+        before = len(review_items)
+        review_items = [
+            item
+            for item in review_items
+            if not is_card_statement_duplicate_expense(
+                str(item.get("name", "")),
+                allow_exclusion=True,
+            )
+        ]
+        removed = before - len(review_items)
+        if removed:
+            warnings.append(
+                f"Removed {removed} card-settlement duplicate(s) from review "
+                "(merchant detail from Max/Leumi cards is kept instead)."
+            )
 
     manual_count = sum(1 for item in review_items if item.get("needs_manual_review"))
     income_count = sum(1 for item in review_items if item.get("is_income"))
@@ -502,74 +787,99 @@ def getExpenses(workbook_path):
     categoryCol = "C"
     # expense cost column
     expenseCol = "F"
-    # first expense row
-    categoryRow = 6
-    expensesDict = {}
+    # first expense row (combined/Max workbooks write data from row 5)
+    categoryRow = 5
+    expenses_list: list[dict] = []
     totalCost = 0.0
-    # loop through the rows and get the expense name and the category, separated by a dash
+    # Keep each source row atomic — never collapse same-name merchants.
     while ws[expenseNameCol + str(categoryRow)].value is not None:
         expenseNameCell = ws[expenseNameCol + str(categoryRow)]
         expenseCostCell = ws[expenseCol + str(categoryRow)]
         expenseCategoryCell = ws[categoryCol + str(categoryRow)]
         incomeFlagCell = ws["G" + str(categoryRow)]
         sourceCell = ws[EXPENSE_SOURCE_COL + str(categoryRow)]
+        dateCell = ws[EXPENSE_DATE_COL + str(categoryRow)]
         raw_cost = expenseCostCell.value
         cost_value = _to_float(raw_cost)
+        name = str(expenseNameCell.value or "").strip()
+        if not name:
+            break
         is_income = resolve_transaction_is_income(
-            str(expenseNameCell.value or ""),
+            name,
             _workbook_row_is_income(incomeFlagCell.value),
         )
-        source_label = (
-            str(sourceCell.value).strip()
-            if sourceCell.value is not None and str(sourceCell.value).strip()
-            else DEFAULT_EXPENSE_SOURCE
+        source_label = normalize_expense_source(
+            sourceCell.value, default=DEFAULT_EXPENSE_SOURCE
         )
+        date_label = normalize_expense_date(dateCell.value)
         if raw_cost is not None and not isinstance(raw_cost, (int, float)):
-            print(f"[getExpenses] Row {categoryRow}: B={expenseNameCell.value!r} F(raw)={raw_cost!r} -> cost={cost_value}")
-        # if the expense name is already in the dict, add the cost of the expense to the last cost
-
-        # if the expense name is already in the dict, add the cost of the expense to the last cost
-        if expenseNameCell.value in expensesDict:
-            existing = expensesDict[expenseNameCell.value]
-            existing[0] += cost_value
-            if len(existing) < 3:
-                existing.append(is_income)
-            else:
-                existing[2] = existing[2] or is_income
-            if len(existing) < 4:
-                existing.append(source_label)
-            else:
-                existing[3] = _merge_expense_sources(existing[3], source_label)
-            totalCost += cost_value
-        # else, add the expense name, it's cost and it's category
-        else:
-            expensesDict.update(
-                {
-                    expenseNameCell.value: [
-                        cost_value,
-                        expenseCategoryCell.value if expenseCategoryCell.value is not None else "",
-                        is_income,
-                        source_label,
-                    ]
-                }
+            print(
+                f"[getExpenses] Row {categoryRow}: B={name!r} F(raw)={raw_cost!r} -> cost={cost_value}"
             )
-            totalCost += cost_value
-        # go to the next row
+        expenses_list.append(
+            {
+                "name": name,
+                "cost": cost_value,
+                "category": (
+                    expenseCategoryCell.value
+                    if expenseCategoryCell.value is not None
+                    else ""
+                ),
+                "is_income": is_income,
+                "source": source_label,
+                "date": date_label,
+            }
+        )
+        totalCost += cost_value
         categoryRow += 1
 
-    expensesSorted = sortExpensesAI(expensesDict)
+    # Prefer merchant detail over checking card-settlement lumps when detail exists
+    # in this workbook (covers older combined files that still contain settlements).
+    has_max_detail = any(
+        row.get("source") == EXPENSE_SOURCE_MAX for row in expenses_list
+    )
+    has_leumi_card_detail = any(
+        row.get("source") == EXPENSE_SOURCE_LEUMI_CARD for row in expenses_list
+    )
+    if has_max_detail or has_leumi_card_detail:
+        filtered: list[dict] = []
+        dropped = 0
+        dropped_sum = 0.0
+        for row in expenses_list:
+            if row.get("source") != EXPENSE_SOURCE_LEUMI_CHECKING:
+                filtered.append(row)
+                continue
+            kind = card_settlement_kind(str(row.get("name", "")))
+            if (kind == "max" and has_max_detail) or (
+                kind == "leumi_mastercard" and has_leumi_card_detail
+            ):
+                dropped += 1
+                dropped_sum += float(row.get("cost") or 0.0)
+                continue
+            filtered.append(row)
+        if dropped:
+            print(
+                f"[getExpenses] Dropped {dropped} checking card-settlement "
+                f"duplicate(s) totaling {round(dropped_sum, 2)} "
+                "(merchant detail present)."
+            )
+            expenses_list = filtered
+            totalCost = round(sum(float(r.get("cost") or 0.0) for r in expenses_list), 2)
+
+    ai_dict = _expense_entries_as_ai_dict(expenses_list)
+    expensesSorted = sortExpensesAI(ai_dict)
     paths = get_paths()
     out_path = paths.data_dir / "expensesDict.txt"
     with out_path.open("w", encoding="utf-8") as file:
         file.write(
-            str(expensesDict)
+            str(expenses_list)
             + "\n"
             + expensesSorted
             + "\n Total cost: "
             + str(totalCost)
         )
 
-    return expensesSorted, expensesDict
+    return expensesSorted, expenses_list
 
 
 # @TODO add the expenses to the final excel file - go through each line in chat's response, for each line, check the name of the expense and it's cost, add the cost to a
@@ -666,8 +976,8 @@ def fillCells(
                 return cat
         return best_cat or raw_category
 
-    # initiate a list of the expenses names and their associated category
-    expenseNameCostCategoryDict = {}
+    # initiate a list of expense lines (keep duplicates — do not collapse by name)
+    expense_lines: list[tuple[str, float, str]] = []
     # User corrections override AI: expense name -> exact template category
     user_corrections = get_category_corrections()
     if user_corrections:
@@ -729,6 +1039,7 @@ def fillCells(
                 print(f"[fillCells] Line {line_no}: cost parse issue: {parse_err}")
                 errorString += f"Invalid cost value: {val}\n"
                 continue
+        name = _strip_duplicate_name_suffix(name)
         if not trust_provided_categories:
             # Income/investment hard overrides apply to AI output only; reviewed choices win.
             normalized_income_key = _normalize_income_name_key(name)
@@ -749,12 +1060,10 @@ def fillCells(
             normalized_name_key = _normalize_expense_name_for_corrections(name)
             if normalized_name_key in user_corrections_norm:
                 category = user_corrections_norm[normalized_name_key]
-        expenseNameCostCategoryDict[name] = [cost_value, _best_category_match(category)]
+        expense_lines.append((name, cost_value, _best_category_match(category)))
 
-    for val in expenseNameCostCategoryDict:
+    for name, add_amount, target_category in expense_lines:
         found = False
-        target_category = expenseNameCostCategoryDict.get(val)[1]
-        add_amount = expenseNameCostCategoryDict.get(val)[0]
         for categoryRow in category_rows:
             cell = ws[f"{categoryCol}{categoryRow}"]
             if cell.value is None:
@@ -769,8 +1078,8 @@ def fillCells(
                     )
                     ws[f"{expenseCol}{categoryRow}"].value = existing_float + add_amount
 
-                source_label = _lookup_expense_source_from_dict(expenses_dict, val)
-                comment_line = f"{val} - {add_amount} ({source_label})"
+                source_label = _lookup_expense_source_from_dict(expenses_dict, name)
+                comment_line = f"{name} - {add_amount} ({source_label})"
                 if ws[f"{expenseCol}{categoryRow}"].comment is None:
                     ws[f"{expenseCol}{categoryRow}"].comment = Comment("", "Automated")
                 comment = Comment(
@@ -782,10 +1091,10 @@ def fillCells(
                 found = True
         if not found:
             errorString += (
-                str(val)
+                str(name)
                 + " "
-                + str(expenseNameCostCategoryDict.get(val)[0])
-                + str(expenseNameCostCategoryDict.get(val)[1])
+                + str(add_amount)
+                + str(target_category)
                 + "\n"
             )
 

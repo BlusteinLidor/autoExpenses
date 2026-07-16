@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import (
+    TEMPLATE_CATEGORY_ROW_RANGES,
     TEMPLATE_EXPENSE_CATEGORY_ROW_RANGES,
     TEMPLATE_INCOME_CATEGORY_ROW_RANGES,
     TEMPLATE_INVESTMENT_CATEGORY_ROW_RANGES,
@@ -197,10 +198,16 @@ def run_month_prepare(payload: Dict[str, Any]) -> Dict[str, Any]:
         for group in allowed_category_groups
         for category in group["categories"]
     ]
+    allow_duplicate_exclusion = True
+    if isinstance(source_expenses_dict, list) and source_expenses_dict:
+        first = source_expenses_dict[0]
+        if isinstance(first, dict) and "_card_export_healthy" in first:
+            allow_duplicate_exclusion = bool(first.get("_card_export_healthy"))
     review_items, review_warnings = build_review_items(
         parsed_items,
         parse_errors,
         expenses_dict=source_expenses_dict,
+        allow_duplicate_exclusion=allow_duplicate_exclusion,
     )
     warnings = [*capture_warnings, *review_warnings]
 
@@ -419,6 +426,58 @@ def investments_summary(year: int, month: int) -> Dict[str, float]:
     )
 
 
+@app.get("/categories")
+def list_categories() -> Dict[str, Any]:
+    """Return template category groups for filters and pickers."""
+    paths = get_paths()
+    template = paths.template_expenses
+    if not template.exists():
+        return {"groups": [], "categories": []}
+    groups = get_allowed_category_groups(str(template))
+    categories = [category for group in groups for category in group["categories"]]
+    return {"groups": groups, "categories": categories}
+
+
+@app.get("/categories/timeline")
+def category_timeline(
+    category: str,
+    mode: str = "year",
+    year: int | None = None,
+    trailing_months: int = 12,
+    start_year: int | None = None,
+    start_month: int | None = None,
+    end_year: int | None = None,
+    end_month: int | None = None,
+) -> Dict[str, Any]:
+    """
+    Build a timeline of monthly amounts for a single category.
+    Uses the same mode/range options as /totals/timeline.
+    """
+    selected_category = (category or "").strip()
+    if not selected_category:
+        raise HTTPException(status_code=400, detail='Query param "category" is required.')
+
+    selected_months = _resolve_timeline_months(
+        mode=mode,
+        year=year,
+        trailing_months=trailing_months,
+        start_year=start_year,
+        start_month=start_month,
+        end_year=end_year,
+        end_month=end_month,
+    )
+    points = [
+        {
+            "year": month_year,
+            "month": month,
+            "label": f"{month_year}-{str(month).zfill(2)}",
+            "amount": _monthly_category_amount(month_year, month, selected_category),
+        }
+        for month_year, month in selected_months
+    ]
+    return {"mode": mode, "category": selected_category, "points": points}
+
+
 @app.get("/totals/timeline")
 def totals_timeline(
     mode: str = "year",
@@ -436,38 +495,52 @@ def totals_timeline(
       - "trailing": use latest N available output months.
       - "range": use inclusive start/end year-month.
     """
+    selected_months = _resolve_timeline_months(
+        mode=mode,
+        year=year,
+        trailing_months=trailing_months,
+        start_year=start_year,
+        start_month=start_month,
+        end_year=end_year,
+        end_month=end_month,
+    )
+    points = [
+        {
+            "year": month_year,
+            "month": month,
+            "label": f"{month_year}-{str(month).zfill(2)}",
+            **_monthly_totals(month_year, month),
+        }
+        for month_year, month in selected_months
+    ]
+    return {"mode": mode, "points": points}
+
+
+def _resolve_timeline_months(
+    *,
+    mode: str,
+    year: int | None,
+    trailing_months: int,
+    start_year: int | None,
+    start_month: int | None,
+    end_year: int | None,
+    end_month: int | None,
+) -> list[tuple[int, int]]:
+    """Resolve (year, month) points for timeline endpoints."""
     paths = get_paths()
     available_months = _available_output_months(paths.data_dir)
     if not available_months:
-        return {"mode": mode, "points": []}
+        return []
 
-    points: list[Dict[str, Any]] = []
     if mode == "year":
         selected_year = year or datetime.now().year
-        for month in range(1, 13):
-            totals = _monthly_totals(selected_year, month)
-            points.append(
-                {
-                    "year": selected_year,
-                    "month": month,
-                    "label": f"{selected_year}-{str(month).zfill(2)}",
-                    **totals,
-                }
-            )
-    elif mode == "trailing":
+        return [(selected_year, month) for month in range(1, 13)]
+
+    if mode == "trailing":
         safe_trailing_months = max(1, min(120, int(trailing_months)))
-        selected = sorted(available_months)[-safe_trailing_months:]
-        for month_year, month in selected:
-            totals = _monthly_totals(month_year, month)
-            points.append(
-                {
-                    "year": month_year,
-                    "month": month,
-                    "label": f"{month_year}-{str(month).zfill(2)}",
-                    **totals,
-                }
-            )
-    elif mode == "range":
+        return sorted(available_months)[-safe_trailing_months:]
+
+    if mode == "range":
         if None in (start_year, start_month, end_year, end_month):
             raise HTTPException(
                 status_code=400,
@@ -489,25 +562,12 @@ def totals_timeline(
                 status_code=400,
                 detail="Range mode start must be earlier than or equal to end.",
             )
+        return _month_span(start=start, end=end)
 
-        selected = _month_span(start=start, end=end)
-        for month_year, month in selected:
-            totals = _monthly_totals(month_year, month)
-            points.append(
-                {
-                    "year": month_year,
-                    "month": month,
-                    "label": f"{month_year}-{str(month).zfill(2)}",
-                    **totals,
-                }
-            )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail='Invalid mode. Please use "year", "trailing", or "range".',
-        )
-
-    return {"mode": mode, "points": points}
+    raise HTTPException(
+        status_code=400,
+        detail='Invalid mode. Please use "year", "trailing", or "range".',
+    )
 
 
 def _summarize_sheet_row_ranges(
@@ -598,6 +658,15 @@ def _monthly_totals(year: int, month: int) -> Dict[str, float]:
         "income": float(income),
         "investments": float(investments),
     }
+
+
+def _monthly_category_amount(year: int, month: int, category: str) -> float:
+    summary = _summarize_sheet_row_ranges(
+        year=year,
+        month=month,
+        row_ranges=list(TEMPLATE_CATEGORY_ROW_RANGES),
+    )
+    return float(summary.get(category, 0.0))
 
 
 def _available_output_months(data_dir: Path) -> list[tuple[int, int]]:

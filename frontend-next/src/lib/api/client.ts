@@ -1,6 +1,8 @@
 import {
   AppState,
   AssetsResponse,
+  CategoriesResponse,
+  CategoryTimelineResponse,
   ExpensesSummary,
   TotalsTimelineResponse,
   FinalizeRunPayload,
@@ -74,17 +76,16 @@ export function getInvestmentsSummary(year: string, month: number) {
   );
 }
 
-export function getTotalsTimeline(
-  mode: "year" | "trailing" | "range",
-  options?: {
-    year?: string;
-    trailingMonths?: number;
-    startYear?: string;
-    startMonth?: number;
-    endYear?: string;
-    endMonth?: number;
-  },
-) {
+type TimelineQueryOptions = {
+  year?: string;
+  trailingMonths?: number;
+  startYear?: string;
+  startMonth?: number;
+  endYear?: string;
+  endMonth?: number;
+};
+
+function timelineParams(mode: "year" | "trailing" | "range", options?: TimelineQueryOptions) {
   const params = new URLSearchParams({ mode });
   if (options?.year) {
     params.set("year", options.year);
@@ -104,7 +105,25 @@ export function getTotalsTimeline(
   if (typeof options?.endMonth === "number") {
     params.set("end_month", String(options.endMonth));
   }
-  return apiFetch<TotalsTimelineResponse>(`/totals/timeline?${params.toString()}`);
+  return params;
+}
+
+export function getCategories() {
+  return apiFetch<CategoriesResponse>("/categories");
+}
+
+export function getTotalsTimeline(mode: "year" | "trailing" | "range", options?: TimelineQueryOptions) {
+  return apiFetch<TotalsTimelineResponse>(`/totals/timeline?${timelineParams(mode, options).toString()}`);
+}
+
+export function getCategoryTimeline(
+  category: string,
+  mode: "year" | "trailing" | "range",
+  options?: TimelineQueryOptions,
+) {
+  const params = timelineParams(mode, options);
+  params.set("category", category);
+  return apiFetch<CategoryTimelineResponse>(`/categories/timeline?${params.toString()}`);
 }
 
 export function prepareRun(payload: PrepareRunPayload) {

@@ -28,6 +28,20 @@ export function money(value: unknown) {
   }).format(safeNumber(value));
 }
 
+/** Format an ISO YYYY-MM-DD (or similar) expense date for display. */
+export function formatExpenseDate(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${day}/${month}/${year}`;
+  }
+  return text;
+}
+
 export function isSplitExpenseName(name: string) {
   return name.replace(/\s+/g, " ").trim() === "העברה דיגיטל";
 }

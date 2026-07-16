@@ -3,6 +3,7 @@
 import { AssetsPanel } from "@/components/assets/AssetsPanel";
 import { SpendingChart } from "@/components/charts/SpendingChart";
 import { TimelineChart } from "@/components/charts/TimelineChart";
+import { CategorySelectItems } from "@/components/review/CategorySelectItems";
 import { ReviewTable } from "@/components/review/ReviewTable";
 import { ProgressPanel } from "@/components/run/ProgressPanel";
 import { RunForm } from "@/components/run/RunForm";
@@ -15,6 +16,8 @@ import {
   finalizeRun,
   getDriveStatus,
   getAssets,
+  getCategories,
+  getCategoryTimeline,
   getExpensesSummary,
   getIncomeSummary,
   getInvestmentsSummary,
@@ -29,6 +32,13 @@ import { AssetsResponse, DriveUploadResult, FinalizeRunItem, PrepareRunResponse 
 import { generateRunToken, monthName, safeNumber } from "@/lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+
+const CATEGORY_TIMELINE_STROKES: Record<string, string> = {
+  income: "#22c55e",
+  necessary_expenses: "#f43f5e",
+  luxury_expenses: "#fb7185",
+  investments: "#6366f1",
+};
 
 function previousCalendarMonth(from = new Date()) {
   const date = new Date(from.getFullYear(), from.getMonth() - 1, 1);
@@ -67,6 +77,8 @@ export default function DashboardPage() {
   const [timelineStartMonth, setTimelineStartMonth] = useState(1);
   const [timelineEndYear, setTimelineEndYear] = useState(String(now.getFullYear()));
   const [timelineEndMonth, setTimelineEndMonth] = useState(now.getMonth() + 1);
+  const [timelineView, setTimelineView] = useState<"totals" | "category">("totals");
+  const [timelineCategory, setTimelineCategory] = useState("");
   const [runToken, setRunToken] = useState("");
   const [status, setStatus] = useState("Ready");
   const [review, setReview] = useState<PrepareRunResponse | null>(null);
@@ -89,6 +101,10 @@ export default function DashboardPage() {
     queryKey: ["investments-summary", breakdownYear, breakdownMonth],
     queryFn: () => getInvestmentsSummary(breakdownYear, breakdownMonth),
   });
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: getCategories,
+  });
   const timelineQuery = useQuery({
     queryKey: [
       "totals-timeline",
@@ -109,6 +125,30 @@ export default function DashboardPage() {
         endYear: timelineMode === "range" ? normalizedTimelineRange.end.year : undefined,
         endMonth: timelineMode === "range" ? normalizedTimelineRange.end.month : undefined,
       }),
+    enabled: timelineView === "totals",
+  });
+  const categoryTimelineQuery = useQuery({
+    queryKey: [
+      "category-timeline",
+      timelineCategory,
+      timelineMode,
+      timelineYear,
+      timelineTrailingMonths,
+      timelineStartYear,
+      timelineStartMonth,
+      timelineEndYear,
+      timelineEndMonth,
+    ],
+    queryFn: () =>
+      getCategoryTimeline(timelineCategory, timelineMode, {
+        year: timelineMode === "year" ? timelineYear : undefined,
+        trailingMonths: timelineMode === "trailing" ? timelineTrailingMonths : undefined,
+        startYear: timelineMode === "range" ? normalizedTimelineRange.start.year : undefined,
+        startMonth: timelineMode === "range" ? normalizedTimelineRange.start.month : undefined,
+        endYear: timelineMode === "range" ? normalizedTimelineRange.end.year : undefined,
+        endMonth: timelineMode === "range" ? normalizedTimelineRange.end.month : undefined,
+      }),
+    enabled: timelineView === "category" && Boolean(timelineCategory),
   });
 
   const progressQuery = useQuery({
@@ -144,6 +184,8 @@ export default function DashboardPage() {
       void queryClient.invalidateQueries({ queryKey: ["income-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["investments-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["totals-timeline"] });
+      void queryClient.invalidateQueries({ queryKey: ["category-timeline"] });
+      void queryClient.invalidateQueries({ queryKey: ["categories"] });
       void queryClient.invalidateQueries({ queryKey: ["drive-status"] });
     },
     onError: (mutationError) => {
@@ -196,6 +238,28 @@ export default function DashboardPage() {
     }
     return { start: end, end: start };
   })();
+  const categoryGroups = categoriesQuery.data?.groups ?? [];
+  const availableCategories = categoriesQuery.data?.categories ?? [];
+
+  useEffect(() => {
+    if (!availableCategories.length) {
+      return;
+    }
+    if (timelineCategory && availableCategories.includes(timelineCategory)) {
+      return;
+    }
+    const preferred =
+      categoryGroups.find((group) => group.id === "necessary_expenses")?.categories[0] ??
+      categoryGroups.find((group) => group.id === "luxury_expenses")?.categories[0] ??
+      availableCategories[0] ??
+      "";
+    setTimelineCategory(preferred);
+  }, [availableCategories, categoryGroups, timelineCategory]);
+
+  const timelineCategoryStroke = useMemo(() => {
+    const groupId = categoryGroups.find((group) => group.categories.includes(timelineCategory))?.id;
+    return (groupId && CATEGORY_TIMELINE_STROKES[groupId]) || "#0ea5e9";
+  }, [categoryGroups, timelineCategory]);
 
   const lastFilled = stateQuery.data?.last_filled_year && stateQuery.data?.last_filled_month
     ? `Last filled: ${monthName(Number(stateQuery.data.last_filled_month))} ${stateQuery.data.last_filled_year}`
@@ -464,6 +528,41 @@ export default function DashboardPage() {
       <section className="rounded-lg border border-border/70 bg-card/40 p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-2">
+            <Label>Timeline View</Label>
+            <Select
+              value={timelineView}
+              onValueChange={(value) => setTimelineView(value === "category" ? "category" : "totals")}
+            >
+              <SelectTrigger className="w-[260px]">
+                <SelectValue placeholder="Timeline view" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="totals">Income / Spending / Investments</SelectItem>
+                <SelectItem value="category">By category</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {timelineView === "category" ? (
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={timelineCategory || undefined}
+                onValueChange={(value) => setTimelineCategory(value ?? "")}
+                disabled={!availableCategories.length}
+              >
+                <SelectTrigger className="w-[240px]">
+                  <SelectValue placeholder={categoriesQuery.isLoading ? "Loading…" : "Select category"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <CategorySelectItems
+                    categories={availableCategories}
+                    categoryGroups={categoryGroups}
+                  />
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+          <div className="space-y-2">
             <Label>Timeline Year</Label>
             <Select value={timelineYear} onValueChange={(value) => setTimelineYear(value ?? timelineYear)}>
               <SelectTrigger className="w-[140px]">
@@ -587,6 +686,7 @@ export default function DashboardPage() {
             </>
           ) : null}
           <p className="pb-2 text-sm text-muted-foreground">
+            {timelineView === "category" && timelineCategory ? `${timelineCategory} · ` : ""}
             {timelineMode === "year"
               ? `Timeline for ${timelineYear}`
               : timelineMode === "range"
@@ -596,10 +696,24 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <TimelineChart
-        points={timelineQuery.data?.points ?? []}
-        loading={timelineQuery.isLoading || timelineQuery.isFetching}
-      />
+      {timelineView === "category" ? (
+        <TimelineChart
+          view="category"
+          category={timelineCategory || "Category"}
+          points={categoryTimelineQuery.data?.points ?? []}
+          stroke={timelineCategoryStroke}
+          loading={
+            categoriesQuery.isLoading ||
+            categoryTimelineQuery.isLoading ||
+            categoryTimelineQuery.isFetching
+          }
+        />
+      ) : (
+        <TimelineChart
+          points={timelineQuery.data?.points ?? []}
+          loading={timelineQuery.isLoading || timelineQuery.isFetching}
+        />
+      )}
     </main>
   );
 }

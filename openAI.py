@@ -112,6 +112,10 @@ def sortExpensesAI(expensesDict: Dict[str, Any], batch_size: int = 25) -> str:
         user_content = "רשימת ההוצאות: " + str(batch_dict)
         if examples_text:
             user_content += examples_text
+        user_content += (
+            "\n\nהערה: אם שם הוצאה מסתיים ב-' ##N' (מספר), זה רק מזהה ייחודי לשורה כפולה — "
+            "החזר את שם ההוצאה ללא הסיומת ##N, ושמור על שורה נפרדת לכל פריט."
+        )
 
         last_output = ""
 

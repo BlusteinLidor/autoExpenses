@@ -28,6 +28,10 @@ export type ReviewItem = {
   cost: number;
   category: string;
   is_income?: boolean;
+  /** Where the transaction came from, e.g. Max / לאומי עו"ש / לאומי כרטיס */
+  source?: string;
+  /** Transaction date as YYYY-MM-DD when available */
+  date?: string | null;
   is_possible_duplicate: boolean;
   needs_manual_review?: boolean;
   error_reason?: string | null;
@@ -102,6 +106,24 @@ export type TotalsTimelinePoint = {
 export type TotalsTimelineResponse = {
   mode: "year" | "trailing" | "range";
   points: TotalsTimelinePoint[];
+};
+
+export type CategoriesResponse = {
+  groups: CategoryGroup[];
+  categories: string[];
+};
+
+export type CategoryTimelinePoint = {
+  year: number;
+  month: number;
+  label: string;
+  amount: number;
+};
+
+export type CategoryTimelineResponse = {
+  mode: "year" | "trailing" | "range";
+  category: string;
+  points: CategoryTimelinePoint[];
 };
 
 export type PrepareRunPayload = {

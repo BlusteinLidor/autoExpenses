@@ -185,8 +185,18 @@ def show_corrections_dialog(year: str, month: str, output_path, ai_output: str, 
 
     regular_items = []
     duplicate_items = []
+    allow_duplicate_exclusion = True
+    if parsed_items and isinstance(parsed_items[0], dict):
+        # Prefer merchant detail; only keep settlement rows when card export is unhealthy.
+        if "_card_export_healthy" in parsed_items[0]:
+            allow_duplicate_exclusion = bool(parsed_items[0].get("_card_export_healthy"))
     for item in parsed_items:
-        if is_card_statement_duplicate_expense(item["name"]):
+        if is_card_statement_duplicate_expense(
+            item["name"], allow_exclusion=allow_duplicate_exclusion
+        ):
+            # Hard-skip when exclusion is allowed — do not offer re-include.
+            if allow_duplicate_exclusion:
+                continue
             duplicate_items.append(item)
         else:
             regular_items.append(item)
