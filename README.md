@@ -74,9 +74,17 @@ For Google Drive, see [GOOGLE_DRIVE_SETUP.md](GOOGLE_DRIVE_SETUP.md).
 
 ## How to run
 
+### Easy start (Windows)
+
+Double-click **`Start AutoExpenses.bat`** in the project folder. It starts the server and opens the dashboard at http://127.0.0.1:8000. Close the window (or press Ctrl+C) to stop.
+
+If you change the Next.js UI, run **`Rebuild Dashboard.bat`** once, then start again.
+
+### Manual setups
+
 There are two common setups.
 
-### Option A — Single server (recommended)
+#### Option A — Single server (recommended)
 
 Build the Next app as a static export, then let FastAPI serve both the API and the UI on one port. API calls use relative URLs (no extra frontend env file).
 
@@ -101,7 +109,7 @@ Open the dashboard at **http://127.0.0.1:8000**.
 
 After you change React/TypeScript code, run `npm run build` again in `frontend-next` and refresh the browser.
 
-### Option B — Split dev servers (UI hot reload)
+#### Option B — Split dev servers (UI hot reload)
 
 Use this when you are actively editing the Next.js app.
 

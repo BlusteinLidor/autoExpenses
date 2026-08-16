@@ -78,21 +78,25 @@ def prepare_for_month(
 
     state = get_state()
     capture_report = state.get("last_max_capture")
-    recon = build_reconciliation_report(
-        year=year,
-        month=month,
-        max_excel_path=Path(
-            paths.max_exports_dir / f"transaction-details_export_{year}_{month}.xlsx"
-        ),
-        leumi_transactions_path=Path(leumi_trans_path) if leumi_trans_path else None,
-        leumi_cards_path=Path(leumi_cards_path) if leumi_cards_path else None,
-        combined_path=source_excel_path if include_leumi else None,
-        max_capture=capture_report if isinstance(capture_report, dict) else None,
-        merge_dedupe_stats=merge_dedupe_stats,
-    )
-    write_reconciliation_report(
-        recon, month_dir / "reconciliation.json"
-    )
+    try:
+        recon = build_reconciliation_report(
+            year=year,
+            month=month,
+            max_excel_path=Path(
+                paths.max_exports_dir / f"transaction-details_export_{year}_{month}.xlsx"
+            ),
+            leumi_transactions_path=Path(leumi_trans_path) if leumi_trans_path else None,
+            leumi_cards_path=Path(leumi_cards_path) if leumi_cards_path else None,
+            combined_path=source_excel_path if include_leumi else None,
+            max_capture=capture_report if isinstance(capture_report, dict) else None,
+            merge_dedupe_stats=merge_dedupe_stats,
+        )
+        write_reconciliation_report(recon, month_dir / "reconciliation.json")
+    except Exception as e:
+        print("[pipeline][error] Reconciliation failed after merge")
+        print(f"[pipeline][error] {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise RuntimeError(f"Pipeline failed at reconciliation: {e}") from e
     if recon.get("blocking_errors"):
         details = "; ".join(str(x) for x in recon["blocking_errors"])
         raise RuntimeError(

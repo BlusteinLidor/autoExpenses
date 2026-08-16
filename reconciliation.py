@@ -47,8 +47,9 @@ def build_reconciliation_report(
     max_rows = read_max_expense_rows(max_excel_path) if max_excel_path.exists() else []
     max_sum = round(sum(r[1] for r in max_rows), 2)
 
-    leumi_checking: List[Tuple[str, float, bool]] = []
-    leumi_cards: List[Tuple[str, float, bool]] = []
+    # (description, amount, is_income, date_iso) — same shape as merge_expenses readers
+    leumi_checking: List[Tuple[str, float, bool, Optional[str]]] = []
+    leumi_cards: List[Tuple[str, float, bool, Optional[str]]] = []
     checking_html_rows = 0
     cards_info: Dict[str, Any] = {
         "title": "",
@@ -159,7 +160,7 @@ def build_reconciliation_report(
         "leumi_checking": {
             "html_data_rows": checking_html_rows,
             "parsed_rows": len(leumi_checking),
-            "amount_sum": round(sum(a for _, a, _ in leumi_checking), 2),
+            "amount_sum": round(sum(row[1] for row in leumi_checking), 2),
         },
         "leumi_cards": cards_info,
         "combined": {

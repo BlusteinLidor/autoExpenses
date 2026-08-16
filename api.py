@@ -76,6 +76,11 @@ def _user_friendly_pipeline_error_message(error: Exception) -> str:
             "Failed while downloading or merging Leumi data. "
             "Please check your Leumi access and try again."
         )
+    if "reconciliation" in lower_message:
+        return (
+            "Downloaded data failed reconciliation checks. "
+            "Please review the exports and try again."
+        )
     if "step 3 (getexpenses/categorize)" in lower_message:
         return (
             "Failed while categorizing expenses. "

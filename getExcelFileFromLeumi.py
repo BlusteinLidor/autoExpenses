@@ -209,13 +209,14 @@ def _select_credit_card_month(
     """
     Select the Leumi cards billing period.
 
-    Tries, in order:
-    1) run month (e.g. יוני 2026) — historical behavior that worked for May
-    2) billing/charge month (usually run month + 1, e.g. יולי) — aligns with Max
+    Leumi labels card statements by charge month (run month + 1). For July
+    expenses (10/7–9/8) the UI option is August; selecting July would return
+    the previous cycle (10/6–9/7).
 
     Returns the Hebrew month label that ended up selected.
     """
     del next_current_month_in_hebrew  # kept for call-site compatibility
+    del month_in_hebrew  # run month is checking-account only; cards use billing month
     _close_leumi_header_overlays(page)
 
     year_full = _full_year(year)
@@ -223,52 +224,54 @@ def _select_credit_card_month(
     if month_number is not None and int(month_number) == 12:
         billing_year = str(int(year_full) + 1)
 
-    candidates: list[tuple[str, str]] = []
-    for label, label_year in (
-        (month_in_hebrew, year_full),
-        (billing_month_in_hebrew, billing_year),
-    ):
-        if label and (label, label_year) not in candidates:
-            candidates.append((label, label_year))
-    if not candidates:
-        raise RuntimeError("No credit-card month candidates to select.")
+    if not billing_month_in_hebrew:
+        raise RuntimeError(
+            "Leumi credit-card export requires billing_month_in_hebrew "
+            "(run month + 1)."
+        )
 
-    last_error = None
-    for label, label_year in candidates:
+    label = billing_month_in_hebrew
+    label_year = billing_year
+    last_error: str | None = None
+
+    try:
+        ok = _click_credit_card_month_option(
+            page, month_label=label, year=label_year
+        )
+        if not ok:
+            raise RuntimeError(f"could not click/select {label!r} ({label_year})")
+
+        _close_leumi_header_overlays(page)
+        selected = _picker_button_label(page)
+        if selected != label:
+            raise RuntimeError(f"after selecting {label!r}, UI shows {selected!r}")
+
+        # Billing-period statement should be present for a historical/current charge month.
+        settled = page.get_by_text("עסקאות בש\"ח במועד החיוב", exact=False)
+        pending_only = page.get_by_text("עסקאות אחרונות שטרם נקלטו", exact=False)
         try:
-            ok = _click_credit_card_month_option(
-                page, month_label=label, year=label_year
-            )
-            if not ok:
-                last_error = f"could not click/select {label!r} ({label_year})"
-                continue
-            _close_leumi_header_overlays(page)
-            selected = _picker_button_label(page)
-            if selected != label:
-                last_error = f"after selecting {label!r}, UI shows {selected!r}"
-                continue
+            if settled.count() == 0 and pending_only.count() > 0:
+                raise RuntimeError(
+                    f"after selecting {label}, only pending card transactions "
+                    "are visible (שטרם נקלטו)"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            # If the pending/settled probes fail, still accept the selected month.
+            pass
 
-            # Billing-period statement should be present for a historical/current charge month.
-            settled = page.get_by_text("עסקאות בש\"ח במועד החיוב", exact=False)
-            pending_only = page.get_by_text("עסקאות אחרונות שטרם נקלטו", exact=False)
-            try:
-                if settled.count() == 0 and pending_only.count() > 0:
-                    last_error = (
-                        f"after selecting {label}, only pending card transactions "
-                        "are visible (שטרם נקלטו)"
-                    )
-                    continue
-            except Exception:
-                pass
-            print(f"[leumi] Selected credit-card period month: {label} {label_year}")
-            return label
-        except Exception as e:
-            last_error = str(e)
-            continue
+        print(
+            f"[leumi] Selected credit-card period month: "
+            f"{label} {label_year} (billing month = run month + 1)"
+        )
+        return label
+    except Exception as e:
+        last_error = str(e)
 
     raise RuntimeError(
-        "Failed to select Leumi credit-card month from candidates "
-        f"{candidates!r}. Last error: {last_error}"
+        "Failed to select Leumi credit-card billing month "
+        f"{label!r} ({label_year}). Last error: {last_error}"
     )
 
 
